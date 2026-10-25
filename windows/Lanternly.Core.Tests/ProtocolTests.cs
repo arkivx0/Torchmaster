@@ -100,7 +100,7 @@ public class SceneTests
 }
 
 /// <summary>
-/// Offline guarantee: no GE / Savant / xlink host name, and no general network API, anywhere in the shipped source
+/// Offline guarantee: no GE cloud host name, and no general network API, anywhere in the shipped source
 /// of either app. Fails the build if one creeps back in.
 /// </summary>
 public class OfflineTests

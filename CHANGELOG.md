@@ -2,10 +2,10 @@
 
 ## 0.1.1 (unreleased)
 **Offline only.** All cloud code is removed: no Cync sign-in, no one-time cloud export, no cloud fallback, and no
-code that contacts any GE/xlink host. The Windows LAN bridge is removed too: it needed GE host names redirected to the
+code that contacts any GE host. The Windows LAN bridge is removed too: it needed GE host names redirected to the
 PC plus per-device IDs and codes that only the cloud provides, so it cannot work offline. Mesh keys now come only
 from "Add a reset bulb" (a key Lanternly generates) or from a key file.
-- New offline tests (both platforms) fail if a GE/xlink host name, a networking API or the Android INTERNET
+- New offline tests (both platforms) fail if a GE cloud host name, a networking API or the Android INTERNET
   permission appears in the source. The Windows core assembly is checked to reference no `System.Net.*` assembly.
 - Android: the INTERNET permission is gone; R8 minification is on (APK 2.2 MB to 0.1 MB); lint now fails the build on errors.
 - Onboarding and docs: bulbs already paired with the Cync app need a factory reset once. The reset loses the current

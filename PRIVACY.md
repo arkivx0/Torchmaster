@@ -2,7 +2,7 @@
 
 Lanternly has no analytics, telemetry, ads, accounts or crash upload.
 
-- **Network: none.** Lanternly never connects to GE, Savant, Cync, xlink or any other server. The Android app does not
+- **Network: none.** Lanternly never connects to GE, Savant, Cync or any other server. The Android app does not
   request the INTERNET permission. The only radio it uses is Bluetooth, to talk to your bulbs.
 - Stored data (homes, rooms, bulbs, mesh keys) is encrypted: Android Keystore (AES-GCM, AtomicFile) / Windows DPAPI
   (current user). The Android vault is excluded from backups. If the stored data cannot be read it is moved aside

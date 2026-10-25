@@ -5,7 +5,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Offline guarantee (mirrors the Windows OfflineTests): no GE / xlink host name, no network API and no INTERNET
+ * Offline guarantee (mirrors the Windows OfflineTests): no GE cloud host name, no network API and no INTERNET
  * permission anywhere in the source of either app.
  */
 class OfflineTest {
