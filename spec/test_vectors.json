@@ -1,0 +1,7 @@
+{
+ "ble_key_encrypt": "43e21cc8ca19a5b32c9dd441cbd8e723",
+ "ble_sk": "5f30eaba8ccca577844ae80318bcb8e0",
+ "ble_plain": "34120000000500d211023c000000000000000000",
+ "ble_enc": "341200c1174be0e38035be8152b7bdf6ff5ec515",
+ "ble_dec_of_enc": "341200c1174be08335a99db8c2794ec38e33fef7"
+}

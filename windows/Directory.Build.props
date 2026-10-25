@@ -1,0 +1,15 @@
+<Project>
+  <!-- Reproducible, path-free builds: no build-machine paths in binaries. -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <PathMap>$(MSBuildProjectDirectory)=./$(MSBuildProjectName)</PathMap>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <Company>Lanternly contributors</Company>
+    <Product>Lanternly</Product>
+    <Version>0.1.1</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+</Project>

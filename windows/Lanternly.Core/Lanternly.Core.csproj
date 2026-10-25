@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+  <ItemGroup><EmbeddedResource Include="../../spec/device_caps.tsv" LogicalName="device_caps.tsv" /></ItemGroup>
+</Project>

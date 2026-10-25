@@ -1,0 +1,5 @@
+{
+ "passphrase": "correct horse battery",
+ "file": "{\"format\": \"lanternly-keyfile\", \"version\": 1, \"kdf\": \"pbkdf2-sha256\", \"iterations\": 600000, \"salt\": \"AAECAwQFBgcICQoLDA0ODw==\", \"nonce\": \"ZGVmZ2hpamtsbW5v\", \"ciphertext\": \"YtZco++Du6KCjKmVzZSkcb19YablDsG75xsjA+3vTWHcW9wPIUlpjd2x0qFsAFY+Ci2655rsoAhzYHzo/xGv/S0UYfo4WrexFdgg2HOWK829k8jho/Mszd1Fx6+/622PvFWLz+vAbINpchbMGJdu6+79QeF2SwMXI7C2lrSk2hbl76c0eDLqxLfix+yNYMW1dckCgQ0ytVyj5FKhX+VdusjURtufKxt7v5xwqmveAVUS1cKI1imwIbsNw+S4ubAnbcqSxJlEdwehzhiBJaxRZpaWVfXcyscL23QkbxbiuqBmxTnLUmTZ3E0=\"}",
+ "mesh_password": "vector-pass-0123"
+}

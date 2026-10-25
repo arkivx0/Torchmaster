@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.Lanternly" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#1A1B26</item>
+        <item name="android:colorAccent">#7AA2F7</item>
+        <item name="android:statusBarColor">#1A1B26</item>
+        <item name="android:navigationBarColor">#1A1B26</item>
+    </style>
+</resources>
