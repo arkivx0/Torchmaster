@@ -237,6 +237,20 @@ public sealed class MainWindow : Window
             DockPanel.SetDock(_viaBox, Dock.Right); line.Children.Add(_viaBox);
             var more = new Button { Content = "⋯", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Color", Visibility = b.Caps.HasFlag(Caps.Temp) || b.Caps.HasFlag(Caps.Color) ? Visibility.Visible : Visibility.Collapsed };
             DockPanel.SetDock(more, Dock.Right); line.Children.Add(more);
+            var find = new Button { Content = "◎", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Find this bulb (blinks)" };
+            int blink = 0; // 0 = idle; otherwise the id of the running blink
+            find.Click += (_, _) =>
+            {
+                if (blink != 0) { blink = 0; w.Run(() => w.Send(h, b, new Cmd.Identify(false))); return; }
+                var id = blink = Environment.TickCount | 1;
+                w.Run(async () =>
+                {
+                    await w.Send(h, b, new Cmd.Identify(true));
+                    await Task.Delay(5000);
+                    if (blink == id) { blink = 0; await w.Send(h, b, new Cmd.Identify(false)); }
+                });
+            };
+            DockPanel.SetDock(find, Dock.Right); line.Children.Add(find);
             DockPanel.SetDock(_dot, Dock.Left); line.Children.Add(_dot);
             line.Children.Add(new TextBlock { Text = b.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             Root.Children.Add(line);
@@ -338,7 +352,7 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.1 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        about.Children.Add(Note("Lanternly 0.1.2 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
         forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await Teardown(); Store.Forget(); _vault = new(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);

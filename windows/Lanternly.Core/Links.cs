@@ -7,6 +7,7 @@ public abstract record Cmd
     public sealed record Brightness(int Pct) : Cmd;
     public sealed record Temp(int Ct) : Cmd;          // 1 warm .. 100 cool (0 is invalid)
     public sealed record Rgb(byte R, byte G, byte B) : Cmd;
+    public sealed record Identify(bool Start) : Cmd;  // blink to find a bulb; no state change
 }
 
 /// <summary>A way to reach bulbs. Lanternly is offline-only: the one implementation is the Bluetooth mesh (plus test fakes).</summary>
@@ -130,6 +131,7 @@ public sealed class BleSession : ILink, IAsyncDisposable
             Cmd.Brightness x => (Ble.CmdBrightness, Ble.BrightnessData(x.Pct)),
             Cmd.Temp t => (Ble.CmdColor, Ble.ColorTempData(t.Ct)),
             Cmd.Rgb r => (Ble.CmdColor, Ble.RgbData(r.R, r.G, r.B)),
+            Cmd.Identify i => (Ble.CmdIdentify, Ble.IdentifyData(i.Start)),
             _ => throw new ArgumentException("unknown command"),
         };
         var pkt = Ble.Command(_sk ?? throw new InvalidOperationException("BLE not logged in"), _mac, NextSeq(), target, cmd, data);

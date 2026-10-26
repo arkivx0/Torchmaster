@@ -16,7 +16,7 @@ public static class Ble
     public static readonly Guid CommandChar = Guid.Parse("00010203-0405-0607-0809-0a0b0c0d1912");
     public static readonly Guid PairChar = Guid.Parse("00010203-0405-0607-0809-0a0b0c0d1914");
     public const ushort Vendor = 0x0211;
-    public const byte CmdPower = 0xd0, CmdBrightness = 0xd2, CmdColor = 0xe2, CmdStatus = 0xdc;
+    public const byte CmdPower = 0xd0, CmdBrightness = 0xd2, CmdColor = 0xe2, CmdStatus = 0xdc, CmdIdentify = 0xf7;
     /// <summary>Target address that reaches every node of the mesh.</summary>
     public const ushort Broadcast = 0xffff;
 
@@ -103,6 +103,8 @@ public static class Ble
     public static byte[] BrightnessData(int pct) => [(byte)Math.Clamp(pct, 0, 100)];
     public static byte[] ColorTempData(int ct) => [0x05, (byte)Math.Clamp(ct, 1, 100)]; // 0 is not a valid temperature
     public static byte[] RgbData(byte r, byte g, byte b) => [0x04, r, g, b];
+    /// <summary>Identify (cmd 0xF7): 03 01 starts blinking, 03 02 stops. On the wire: F7 11 02 03 01/02.</summary>
+    public static byte[] IdentifyData(bool start) => [0x03, (byte)(start ? 1 : 2)];
 
     /// <summary>Status notification (decrypted, cmd 0xDC): up to two 4-byte node records at [10..18).</summary>
     public static List<BulbState> ParseStatus(byte[] d)

@@ -103,6 +103,21 @@ public class EndToEndTests
     }
 
     [Fact]
+    public async Task IdentifyStartAndStopReachTheNodeAsF7()
+    {
+        var home = MakeHome();
+        var node = new FakeNode(home.Bulbs[0].Mac, home.MeshName, home.MeshPassword);
+        await using var ble = new BleSession(node, home);
+        await ble.LoginAsync();
+        var router = new Router([ble]);
+        await router.SendAsync(home, home.Bulbs[1], new Cmd.Identify(true));
+        await router.SendAsync(home, home.Bulbs[1], new Cmd.Identify(false));
+        Assert.Equal("f7110203010000000000", Convert.ToHexString(node.Plain[0][7..17]).ToLowerInvariant());
+        Assert.Equal("f7110203020000000000", Convert.ToHexString(node.Plain[1][7..17]).ToLowerInvariant());
+        Assert.Equal(3, node.Plain[0][5]);
+    }
+
+    [Fact]
     public async Task AdoptFactoryResetBulbOntoOwnMesh()
     {
         var node = new FakeNode("AA:BB:CC:DD:EE:09", Ble.FactoryName, Ble.FactoryPassword);

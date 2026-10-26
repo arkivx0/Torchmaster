@@ -70,6 +70,29 @@ public class ProtocolTests
 public class SceneTests
 {
     [Fact]
+    public void RedSceneIsPowerOnPlusRedAndOnlyColorBulbsGetTheColor()
+    {
+        var red = Scenes.All.First(s => s.Name == "Red");
+        Assert.Equal([new Cmd.Power(true), new Cmd.Rgb(255, 0, 0)], red.Steps);
+        Assert.Equal(2, Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Color).Count());
+        Assert.Equal([new Cmd.Power(true)], Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Temp));
+    }
+
+    [Fact] // Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop).
+    public void IdentifyCommandLayout()
+    {
+        Assert.Equal(0xf7, Ble.CmdIdentify);
+        Assert.Equal(new byte[] { 0x03, 0x01 }, Ble.IdentifyData(true));
+        Assert.Equal(new byte[] { 0x03, 0x02 }, Ble.IdentifyData(false));
+        var sk = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray(); var mac = Ble.MacLe("AA:BB:CC:DD:EE:FF");
+        foreach (var (start, last) in new[] { (true, (byte)1), (false, (byte)2) })
+        {
+            var plain = new byte[20] { 0x34, 0x12, 0x00, 0, 0, 0x05, 0x00, 0xf7, 0x11, 0x02, 0x03, last, 0, 0, 0, 0, 0, 0, 0, 0 };
+            Assert.Equal(Ble.EncryptPacket(sk, mac, plain), Ble.Command(sk, mac, 0x1234, 5, Ble.CmdIdentify, Ble.IdentifyData(start)));
+        }
+    }
+
+    [Fact]
     public void ScenesSkipUnsupportedSteps()
     {
         var night = Scenes.All.First(s => s.Name == "Night");
@@ -119,8 +142,10 @@ public class OfflineTests
             .Where(f => !f.EndsWith("ProtocolTests.cs") && !f.EndsWith("OfflineTest.kt")); // the checks themselves
 
     // Built from pieces so this file does not match its own scan.
-    static readonly string[] Hosts = ["geli" + "ghting", "xli" + "nk", "cm-" + "sec", "cync" + ".com", "api." + "ge"];
-    static readonly string[] NetApis = ["Tcp" + "Client", "Tcp" + "Listener", "Http" + "Client", "Ssl" + "Stream", "System.Net." + "Http", "System.Net." + "Sockets", "java.net." + "Socket", "javax.net", "Http" + "URLConnection", "Server" + "Socket", "android.permission." + "INTERNET"];
+    static readonly string[] Hosts = ["geli" + "ghting", "xli" + "nk", "cm-" + "sec", "cync" + ".com", "api." + "ge", "cync" + "smart", "savant" + "cloud", "savant" + " cloud", "savant" + ".com"];
+    static readonly string[] NetApis = ["Tcp" + "Client", "Tcp" + "Listener", "Http" + "Client", "Ssl" + "Stream", "System.Net." + "Http", "System.Net." + "Sockets", "java.net." + "Socket", "javax.net", "Http" + "URLConnection", "Server" + "Socket", "android.permission." + "INTERNET", "Udp" + "Client", "Datagram" + "Socket", "Web" + "Client", "Web" + "Request"];
+    // Vendor LAN/cloud protocol markers (UDP port and Xlink framing).
+    static readonly string[] LanMarkers = ["59" + "87", "XLINK" + "_", "Xlink" + "Sdk"];
 
     [Fact]
     public void NoGeHostNamesInSource()
@@ -134,6 +159,29 @@ public class OfflineTests
     {
         var hits = SourceFiles(RepoRoot()).SelectMany(f => NetApis.Where(h => File.ReadAllText(f).Contains(h)).Select(h => $"{Path.GetFileName(f)}: {h}")).ToList();
         Assert.Empty(hits);
+    }
+
+    [Fact]
+    public void NoVendorLanMarkersInSource()
+    {
+        var hits = SourceFiles(RepoRoot()).SelectMany(f => LanMarkers.Where(h => File.ReadAllText(f).Contains(h, StringComparison.OrdinalIgnoreCase)).Select(h => $"{Path.GetFileName(f)}: {h}")).ToList();
+        Assert.Empty(hits);
+    }
+
+    [Fact]
+    public void CoreSourceUsesNoSystemNet()
+    {
+        var core = Path.Combine(RepoRoot(), "windows", "Lanternly.Core");
+        var hits = SourceFiles(core).Where(f => File.ReadAllText(f).Contains("System." + "Net")).Select(Path.GetFileName).ToList();
+        Assert.Empty(hits);
+    }
+
+    [Fact]
+    public void AndroidManifestHasNoInternetPermission()
+    {
+        var m = File.ReadAllText(Path.Combine(RepoRoot(), "android", "app", "src", "main", "AndroidManifest.xml"));
+        Assert.DoesNotContain("permission." + "INTERNET", m);
+        Assert.DoesNotContain("ACCESS_" + "NETWORK_STATE", m);
     }
 
     [Fact]

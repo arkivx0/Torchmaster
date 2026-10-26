@@ -11,6 +11,7 @@ public static class Scenes
         new("Relax", [new Cmd.Power(true), new Cmd.Brightness(45), new Cmd.Temp(10)]),
         new("Focus", [new Cmd.Power(true), new Cmd.Brightness(90), new Cmd.Temp(100)]),
         new("Night", [new Cmd.Power(true), new Cmd.Brightness(8), new Cmd.Temp(1)]),
+        new("Red", [new Cmd.Power(true), new Cmd.Rgb(255, 0, 0)]),
         new("Off", [new Cmd.Power(false)]),
     ];
 

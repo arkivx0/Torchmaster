@@ -131,7 +131,7 @@ class MainActivity : Activity() {
             for (b in bulbs) try {
                 router.send(h, b, c)
                 val st = b.state ?: BulbState(b.meshId, true, false, 50, 50, Triple(0, 0, 0))
-                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)) }
+                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify -> st }
                 ok++
             } catch (e: Exception) { if (err == null) err = "${b.name}: ${e.message}"; Diag.log("send", e) }
             val r = BatchResult(ok, bulbs.size, err)
@@ -189,6 +189,12 @@ class MainActivity : Activity() {
         val dot = View(this); line.addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(8) })
         line.addView(text(b.name, 14f, FG), LinearLayout.LayoutParams(0, -2, 1f))
         val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(dp(18), 0, 0, dp(4)) }
+        var blinking = false
+        val stopBlink = Runnable { if (blinking) { blinking = false; send(h, listOf(b), Cmd.Identify(false)) } }
+        line.addView(button("◎") {
+            ui.removeCallbacks(stopBlink)
+            if (blinking) stopBlink.run() else { blinking = true; send(h, listOf(b), Cmd.Identify(true)); ui.postDelayed(stopBlink, 5000) }
+        }.apply { contentDescription = "Find this bulb" })
         if (b.has(Caps.TEMP) || b.has(Caps.COLOR)) line.addView(button("⋯") { extra.visibility = if (extra.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
         val via = text("", 10f, DIM).apply { setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(CTL, 4) }
         line.addView(via, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6); rightMargin = dp(6) })
@@ -247,7 +253,7 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.1 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.2 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
             AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> io.execute { teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()

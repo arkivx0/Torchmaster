@@ -14,9 +14,18 @@ class OfflineTest {
     private fun sources() = root.walkTopDown().onEnter { it.name !in skip }.filter { it.isFile && it.extension in setOf("kt", "kts", "xml", "cs", "csproj", "props", "pro") }
         .filter { it.name != "OfflineTest.kt" && it.name != "ProtocolTests.cs" }.toList()
     // Built from pieces so this file never matches its own scan.
-    private val hosts = listOf("geli" + "ghting", "xli" + "nk", "cm-" + "sec", "cync" + ".com", "api." + "ge")
-    private val apis = listOf("java.net." + "Socket", "javax.net", "Http" + "URLConnection", "Server" + "Socket", "android.permission." + "INTERNET", "Tcp" + "Client", "Http" + "Client", "Ssl" + "Stream")
+    private val hosts = listOf("geli" + "ghting", "xli" + "nk", "cm-" + "sec", "cync" + ".com", "api." + "ge", "cync" + "smart", "savant" + "cloud", "savant" + " cloud", "savant" + ".com")
+    private val apis = listOf("java.net." + "Socket", "javax.net", "Http" + "URLConnection", "Server" + "Socket", "android.permission." + "INTERNET", "Tcp" + "Client", "Http" + "Client", "Ssl" + "Stream", "Datagram" + "Socket", "Udp" + "Client")
+    // Vendor LAN/cloud protocol markers (UDP port and Xlink framing).
+    private val lanMarkers = listOf("59" + "87", "XLINK" + "_", "Xlink" + "Sdk")
+    private fun scan(files: List<File>, needles: List<String>, ignoreCase: Boolean) = files.flatMap { f -> val t = f.readText(); needles.filter { t.contains(it, ignoreCase) }.map { "${f.name}: $it" } }
 
     @Test fun noGeHostNames() = assertEquals(emptyList<String>(), sources().flatMap { f -> val t = f.readText(); hosts.filter { t.contains(it, ignoreCase = true) }.map { "${f.name}: $it" } })
+    @Test fun noVendorLanMarkers() = assertEquals(emptyList<String>(), scan(sources(), lanMarkers, true))
+    @Test fun appSourceUsesNoJavaNet() = assertEquals(emptyList<String>(), scan(sources().filter { it.extension == "kt" && it.path.contains("android") }, listOf("java." + "net", "okhttp", "Url" + "Connection"), false))
+    @Test fun manifestHasNoInternetPermission() {
+        val m = File(root, "android/app/src/main/AndroidManifest.xml").readText()
+        assertEquals(false, m.contains("permission." + "INTERNET") || m.contains("ACCESS_" + "NETWORK_STATE"))
+    }
     @Test fun noNetworkApisOrPermission() = assertEquals(emptyList<String>(), sources().flatMap { f -> val t = f.readText(); apis.filter { t.contains(it) }.map { "${f.name}: $it" } })
 }

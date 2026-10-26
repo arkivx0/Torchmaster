@@ -12,6 +12,8 @@ AES-128-ECB with key and data byte-reversed ("Telink AES").
   session key = `AES(name^password, r8 | d8)`.
 - Command: 20 bytes `seq(3 LE) mic(2) target(u16 LE) cmd vendor(11 02) data[10]`; MIC/keystream with nonces
   built from the MAC (LE) and seq (see `Ble.EncryptPacket`). Same command codes: `d0`, `d2`, `e2 05 ct`, `e2 04 r g b`.
+- Identify (blink to find a bulb): cmd `f7`, data `03 01` = start, `03 02` = stop. Plaintext bytes 7..11 on the
+  wire: `f7 11 02 03 01` / `f7 11 02 03 02` (same as the official app). No state change.
 - Status notifications: cmd `dc`, two 4-byte records `[mesh, online, bri(+128 = rgb mode), ct or rgb332]`.
 - Provision a factory-reset node (`telink_mesh1` / `123`): log in, then write to pair
   `04 AES(sk, pad16(new_name))`, `05 AES(sk, pad16(new_password))`, `06 AES(sk, ltk)`; read back `07` = confirmed.

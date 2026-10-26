@@ -47,6 +47,24 @@ class ProtocolTest {
         assertEquals("123456", KeyFile.import(KeyFile.export(v, null), null).homes[0].meshPassword)
     }
 
+    /** Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop). */
+    @Test fun identifyCommandLayout() {
+        assertEquals(0xf7, Ble.CMD_IDENTIFY)
+        assertArrayEquals(byteArrayOf(3, 1), Ble.identifyData(true)); assertArrayEquals(byteArrayOf(3, 2), Ble.identifyData(false))
+        val sk = ByteArray(16) { it.toByte() }; val mac = Ble.macLe("AA:BB:CC:DD:EE:FF")
+        for ((start, last) in listOf(true to 1, false to 2)) {
+            val plain = unhex("341200000005 00f7110203".replace(" ", "") + "%02x".format(last) + "0000000000000000")
+            assertArrayEquals(Ble.encryptPacket(sk, mac, plain), Ble.command(sk, mac, 0x1234, 5, Ble.CMD_IDENTIFY, Ble.identifyData(start)))
+        }
+    }
+
+    @Test fun redScene() {
+        val red = Scenes.all.first { it.name == "Red" }
+        assertEquals(listOf(Cmd.Power(true), Cmd.Rgb(255, 0, 0)), red.steps)
+        assertEquals(listOf(Cmd.Power(true)), Scenes.stepsFor(red, Bulb("W", 2, 99999, "AA:BB:CC:DD:EE:03")))
+        assertEquals(2, Scenes.stepsFor(red, Bulb("C", 2, 6, "AA:BB:CC:DD:EE:04")).size)
+    }
+
     @Test fun colorTempZeroIsClampedToOne() = assertEquals(1, Ble.colorTempData(0)[1].toInt())
 
     @Test fun batchAndSceneReportPartialSuccess() {
@@ -115,6 +133,9 @@ class ProtocolTest {
         val p = node.plain.single()
         assertEquals(3, p[5].toInt()); assertEquals(Ble.CMD_COLOR, p[7].toInt() and 0xff)
         assertArrayEquals(byteArrayOf(4, 1, 2, 3), p.copyOfRange(10, 14))
+        Router(listOf(s)).send(h, h.bulbs[1], Cmd.Identify(true)); Router(listOf(s)).send(h, h.bulbs[1], Cmd.Identify(false))
+        assertEquals("f7110203010000000000", hex(node.plain[1].copyOfRange(7, 17)))
+        assertEquals("f7110203020000000000", hex(node.plain[2].copyOfRange(7, 17)))
         val bad = BleSession(FakeNode(h.bulbs[0].mac, h.meshName, "nope"), h)
         assertThrows(SecurityException::class.java) { bad.login() }
     }

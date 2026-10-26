@@ -11,7 +11,7 @@ object Ble {
     val COMMAND: UUID = UUID.fromString("00010203-0405-0607-0809-0a0b0c0d1912")
     val PAIR: UUID = UUID.fromString("00010203-0405-0607-0809-0a0b0c0d1914")
     const val VENDOR = 0x0211
-    const val CMD_POWER = 0xd0; const val CMD_BRIGHTNESS = 0xd2; const val CMD_COLOR = 0xe2; const val CMD_STATUS = 0xdc
+    const val CMD_POWER = 0xd0; const val CMD_BRIGHTNESS = 0xd2; const val CMD_COLOR = 0xe2; const val CMD_STATUS = 0xdc; const val CMD_IDENTIFY = 0xf7
 
     fun aes(key: ByteArray, block: ByteArray): ByteArray {
         val c = Cipher.getInstance("AES/ECB/NoPadding")
@@ -75,6 +75,8 @@ object Ble {
     fun brightnessData(pct: Int) = byteArrayOf(pct.coerceIn(1, 100).toByte())
     fun colorTempData(ct: Int) = byteArrayOf(0x05, ct.coerceIn(1, 100).toByte())
     fun rgbData(r: Int, g: Int, b: Int) = byteArrayOf(0x04, r.toByte(), g.toByte(), b.toByte())
+    /** Identify (cmd 0xF7): 03 01 starts blinking, 03 02 stops. On the wire: F7 11 02 03 01/02. */
+    fun identifyData(start: Boolean) = byteArrayOf(0x03, if (start) 1 else 2)
 
     fun parseStatus(d: ByteArray): List<BulbState> {
         if (d.size < 18 || u(d, 7) != CMD_STATUS) return emptyList()

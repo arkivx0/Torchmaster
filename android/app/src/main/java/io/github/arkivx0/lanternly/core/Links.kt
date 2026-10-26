@@ -8,6 +8,7 @@ sealed class Cmd {
     data class Brightness(val pct: Int) : Cmd()
     data class Temp(val ct: Int) : Cmd()   // 1 warm .. 100 cool (0 is invalid)
     data class Rgb(val r: Int, val g: Int, val b: Int) : Cmd()
+    data class Identify(val start: Boolean) : Cmd()   // blink to find a bulb; no state change
 }
 
 interface Link {
@@ -54,6 +55,7 @@ object Scenes {
         Scene("Relax", listOf(Cmd.Power(true), Cmd.Brightness(45), Cmd.Temp(10))),
         Scene("Focus", listOf(Cmd.Power(true), Cmd.Brightness(90), Cmd.Temp(100))),
         Scene("Night", listOf(Cmd.Power(true), Cmd.Brightness(8), Cmd.Temp(1))),
+        Scene("Red", listOf(Cmd.Power(true), Cmd.Rgb(255, 0, 0))),
         Scene("Off", listOf(Cmd.Power(false))),
     )
     /** A bulb counts as updated only if every step reached it. */
@@ -101,6 +103,7 @@ class BleSession(private val g: GattPort, private val home: Home) : Link {
             is Cmd.Brightness -> Ble.CMD_BRIGHTNESS to Ble.brightnessData(c.pct)
             is Cmd.Temp -> Ble.CMD_COLOR to Ble.colorTempData(c.ct)
             is Cmd.Rgb -> Ble.CMD_COLOR to Ble.rgbData(c.r, c.g, c.b)
+            is Cmd.Identify -> Ble.CMD_IDENTIFY to Ble.identifyData(c.start)
         }
         val key = sk ?: throw NotReachable("BLE not logged in")
         g.write(Ble.COMMAND, Ble.command(key, mac, nextSeq(), b.meshId, cmd, data), false)

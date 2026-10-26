@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 (unreleased)
+- "Find this bulb": a per-bulb button makes the bulb blink (BLE identify command); it stops after a few seconds
+  or on a second tap.
+- New "Red" quick scene (color bulbs turn red; other bulbs just turn on).
+- Privacy notes: how Lanternly differs from the vendor app, and why it is Bluetooth-only.
+- More offline regression tests (both platforms): vendor cloud names, vendor LAN markers, networking APIs and
+  the INTERNET permission fail the build. New test pins the identify command bytes.
+
 ## 0.1.1 (unreleased)
 **Offline only.** All cloud code is removed: no Cync sign-in, no one-time cloud export, no cloud fallback, and no
 code that contacts any GE host. The Windows LAN bridge is removed too: it needed GE host names redirected to the
