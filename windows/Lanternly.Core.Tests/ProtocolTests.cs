@@ -79,6 +79,16 @@ public class SceneTests
         Assert.Equal([new Cmd.Power(true)], Scenes.For(red, Caps.OnOff));
     }
 
+    [Fact] // Factory reset = Telink kick-out, as the official app's KickOutDeviceCommand: E3 11 02 01
+    public void KickOutCommandLayout()
+    {
+        Assert.Equal(0xe3, Ble.CmdKickOut);
+        Assert.Equal(new byte[] { 0x01 }, Ble.KickOutData());
+        var sk = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray(); var mac = Ble.MacLe("AA:BB:CC:DD:EE:FF");
+        var plain = new byte[20]; plain[0] = 0x34; plain[1] = 0x12; plain[5] = 7; plain[7] = 0xe3; plain[8] = 0x11; plain[9] = 0x02; plain[10] = 0x01;
+        Assert.Equal(Ble.EncryptPacket(sk, mac, plain), Ble.Command(sk, mac, 0x1234, 7, Ble.CmdKickOut, Ble.KickOutData()));
+    }
+
     [Fact] // Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop).
     public void IdentifyCommandLayout()
     {

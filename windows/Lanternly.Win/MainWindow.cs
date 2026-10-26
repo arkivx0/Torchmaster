@@ -52,7 +52,7 @@ public sealed class MainWindow : Window
         title.Children.Add(new TextBlock { Text = "Lanternly", FontSize = 18, FontWeight = FontWeights.SemiBold });
         title.Children.Add(_status);
         top.Children.Add(title);
-        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { await StopAllBlinks(); _set.HomeIndex = _homePick.SelectedIndex; Save(); await Reconnect(); } };
+        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { var idx = _homePick.SelectedIndex; await StopAllBlinks(); await _scheduleGate.WaitAsync(); /* never swap the connection under a running schedule */ try { _set.HomeIndex = idx; Save(); await Reconnect(); } finally { _scheduleGate.Release(); } } };
 
         var root = new DockPanel();
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
@@ -285,6 +285,32 @@ public sealed class MainWindow : Window
         });
     }
 
+    // ---------------- reset bulb (factory reset over BLE) ----------------
+    void ResetBulb(Home h, Bulb b)
+    {
+        if (MessageBox.Show(this, BulbReset.ConfirmText(b), BulbReset.ConfirmTitle, MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+        if (MessageBox.Show(this, $"Last check: erase the pairing of \"{b.Name}\" now? This cannot be undone.", BulbReset.ConfirmTitle, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        Run(async () =>
+        {
+            if (_demo) { SetStatus("Demo mode: nothing was reset."); return; }
+            await _scheduleGate.WaitAsync(); // never in the middle of a schedule run
+            try
+            {
+                SetStatus($"Resetting {b.Name}…");
+                if (_ble?.LoggedIn != true) await Reconnect();
+                _blinks.Stop(b); _blinkHome.Remove(b);
+                try { await BulbReset.ResetAsync(_router, h, b); }
+                catch (Exception ex) { throw new IOException($"{b.Name}: reset not sent ({ex.Message}). Nothing was removed.", ex); }
+                Save();
+                await Reconnect(); // the reset bulb may have been our connection
+                SetStatus(BulbReset.Done);
+                MessageBox.Show(this, BulbReset.Done, "Bulb reset", MessageBoxButton.OK, MessageBoxImage.Information);
+                _settingsOpen = true; _schedulesOpen = false; Render();
+            }
+            finally { _scheduleGate.Release(); }
+        });
+    }
+
     // ---------------- connections ----------------
     async Task Teardown()
     {
@@ -333,7 +359,7 @@ public sealed class MainWindow : Window
     async Task Send(Home h, Bulb b, Cmd c)
     {
         await _router.SendAsync(h, b, c);
-        if (c is Cmd.Identify) return; // identify does not change on/brightness/color
+        if (c is Cmd.Identify or Cmd.FactoryReset) return; // no on/brightness/color change
         var st = b.State ?? new BulbState(b.MeshId, true, false, 50, 50, (0, 0, 0));
         b.State = c switch
         {
@@ -441,7 +467,8 @@ public sealed class MainWindow : Window
             DockPanel.SetDock(_sw, Dock.Right); line.Children.Add(_sw);
             _viaBox = new Border { CornerRadius = new CornerRadius(4), Background = Br("Ctl"), Padding = new Thickness(0, 1, 0, 1), Child = _via, VerticalAlignment = VerticalAlignment.Center, ToolTip = "How this bulb is reached" };
             DockPanel.SetDock(_viaBox, Dock.Right); line.Children.Add(_viaBox);
-            var more = new Button { Content = "⋯", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Color", Visibility = b.Caps.HasFlag(Caps.Temp) || b.Caps.HasFlag(Caps.Color) ? Visibility.Visible : Visibility.Collapsed };
+            var more = new Button { Content = "⋯", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "More: color, reset bulb" };
+            System.Windows.Automation.AutomationProperties.SetName(more, "More options: " + b.Name);
             DockPanel.SetDock(more, Dock.Right); line.Children.Add(more);
             _w = w;
             _find = new Button { Content = "◎", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Find this bulb (blinks)" };
@@ -487,6 +514,10 @@ public sealed class MainWindow : Window
                 };
                 sw.Children.Add(pick); extra.Children.Add(sw);
             }
+            var reset = new Button { Content = "Reset bulb…", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, ToolTip = "Factory reset over Bluetooth (erases the pairing)" };
+            System.Windows.Automation.AutomationProperties.SetName(reset, "Reset bulb: " + b.Name);
+            reset.Click += (_, _) => w.ResetBulb(h, b);
+            extra.Children.Add(reset);
             more.Click += (_, _) => extra.Visibility = extra.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
             Root.Children.Add(extra);
         }
@@ -556,7 +587,7 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        about.Children.Add(Note("Lanternly 0.1.4 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
         forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);

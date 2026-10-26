@@ -16,7 +16,7 @@ public static class Ble
     public static readonly Guid CommandChar = Guid.Parse("00010203-0405-0607-0809-0a0b0c0d1912");
     public static readonly Guid PairChar = Guid.Parse("00010203-0405-0607-0809-0a0b0c0d1914");
     public const ushort Vendor = 0x0211;
-    public const byte CmdPower = 0xd0, CmdBrightness = 0xd2, CmdColor = 0xe2, CmdStatus = 0xdc, CmdIdentify = 0xf7;
+    public const byte CmdPower = 0xd0, CmdBrightness = 0xd2, CmdColor = 0xe2, CmdStatus = 0xdc, CmdIdentify = 0xf7, CmdKickOut = 0xe3;
     /// <summary>Target address that reaches every node of the mesh.</summary>
     public const ushort Broadcast = 0xffff;
 
@@ -105,6 +105,10 @@ public static class Ble
     public static byte[] RgbData(byte r, byte g, byte b) => [0x04, r, g, b];
     /// <summary>Identify (cmd 0xF7): 03 01 starts blinking, 03 02 stops. On the wire: F7 11 02 03 01/02.</summary>
     public static byte[] IdentifyData(bool start) => [0x03, (byte)(start ? 1 : 2)];
+    /// <summary>Kick-out param 0x01: leave the mesh and return to factory defaults (telink_mesh1 / 123).</summary>
+    public const byte KickOutFactoryReset = 0x01;
+    /// <summary>Factory reset (Telink kick-out, cmd 0xE3, data 01). On the wire: E3 11 02 01, as the official app's KickOutDeviceCommand.</summary>
+    public static byte[] KickOutData() => [KickOutFactoryReset];
 
     /// <summary>Status notification (decrypted, cmd 0xDC): up to two 4-byte node records at [10..18).</summary>
     public static List<BulbState> ParseStatus(byte[] d)

@@ -90,7 +90,8 @@ public static class Store
     public static void SaveSchedules(List<Schedule> l)
     {
         Directory.CreateDirectory(Dir);
-        File.WriteAllText(SchedulesPath + ".tmp", Schedules.ToJson(l));
+        string? old = null; try { if (File.Exists(SchedulesPath)) old = File.ReadAllText(SchedulesPath); } catch (Exception ex) { Program.Log(ex, "schedules read before save"); }
+        File.WriteAllText(SchedulesPath + ".tmp", Schedules.ToJsonKeepingSkipped(l, old)); // invalid entries skipped at load are kept
         File.Move(SchedulesPath + ".tmp", SchedulesPath, true);
     }
 

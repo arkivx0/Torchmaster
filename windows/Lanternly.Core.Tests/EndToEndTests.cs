@@ -32,6 +32,7 @@ sealed class FakeNode(string mac, string name, string pass) : IGatt
             var check = Ble.EncryptPacket(_sk!, m, [.. p[..3], 0, 0, .. p[5..]]);
             Assert.Equal(d[3..5], check[3..5]); // MIC verifies
             Plain.Add(p);
+            if (p[7] == Ble.CmdKickOut && p[10] == Ble.KickOutFactoryReset) { name = Ble.FactoryName; pass = Ble.FactoryPassword; _sk = null; KickedOut++; }
         }
         else if (ch == Ble.NotifyChar && _notify != null)
         {
@@ -43,6 +44,7 @@ sealed class FakeNode(string mac, string name, string pass) : IGatt
     }
     public Task<byte[]> ReadAsync(Guid ch) => Task.FromResult(_pairReply);
     public byte[]? NewName, NewPass;
+    public int KickedOut;
     public void HandleProvision(byte[] d)
     {
         // device side: decrypt with the Telink AES inverse and adopt the new credentials
@@ -167,6 +169,40 @@ public class EndToEndTests
         Assert.Equal("f7110203010000000000", Convert.ToHexString(node.Plain[0][7..17]).ToLowerInvariant());
         Assert.Equal("f7110203020000000000", Convert.ToHexString(node.Plain[1][7..17]).ToLowerInvariant());
         Assert.Equal(3, node.Plain[0][5]);
+    }
+
+    [Fact] // Reset bulb: E3 11 02 01 to the bulb, the node returns to telink_mesh1/123, the app forgets it, and it can be adopted again
+    public async Task ResetBulbReturnsItToFactoryAndItCanBeAdoptedAgain()
+    {
+        var home = MakeHome();
+        var target = home.Bulbs[0];
+        home.Rooms.Add(new Room { Id = 9, Name = "Test", MeshIds = [target.MeshId] });
+        var node = new FakeNode(target.Mac, home.MeshName, home.MeshPassword);
+        await using (var ble = new BleSession(node, home))
+        {
+            await ble.LoginAsync();
+            await BulbReset.ResetAsync(new Router([ble]), home, target);
+        }
+        Assert.Equal($"e31102{Ble.KickOutFactoryReset:x2}000000000000", Convert.ToHexString(node.Plain[0][7..17]).ToLowerInvariant());
+        Assert.Equal(target.MeshId, (ushort)(node.Plain[0][5] | node.Plain[0][6] << 8));
+        Assert.True(node.KickedOut >= 1);
+        Assert.DoesNotContain(target, home.Bulbs);
+        Assert.DoesNotContain(target.MeshId, home.Rooms.Single(r => r.Id == 9).MeshIds);
+        // old credentials no longer work; factory ones do, and the bulb can be adopted fresh
+        await using (var old = new BleSession(node, home)) await Assert.ThrowsAsync<UnauthorizedAccessException>(old.LoginAsync);
+        var (n, p) = Ble.NewMeshCredentials();
+        await BleSession.ProvisionAsync(node, n, p);
+        var fresh = new Home { MeshName = n, MeshPassword = p, Bulbs = [new Bulb { Name = "Again", MeshId = 0, Type = DeviceCaps.AllControls, Mac = node.Mac }] };
+        await using var s2 = new BleSession(node, fresh); await s2.LoginAsync();
+        Assert.Equal(Via.Ble, await new Router([s2]).SendAsync(fresh, fresh.Bulbs[0], new Cmd.Power(true)));
+    }
+
+    [Fact] // a reset that never left the radio must not remove the bulb
+    public async Task ResetBulbKeepsBulbWhenNotSent()
+    {
+        var home = MakeHome(); var b = home.Bulbs[0];
+        await Assert.ThrowsAnyAsync<Exception>(() => BulbReset.ResetAsync(new Router([]), home, b));
+        Assert.Contains(b, home.Bulbs);
     }
 
     [Fact]

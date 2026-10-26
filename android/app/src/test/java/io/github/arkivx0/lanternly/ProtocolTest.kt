@@ -47,6 +47,34 @@ class ProtocolTest {
         assertEquals("123456", KeyFile.import(KeyFile.export(v, null), null).homes[0].meshPassword)
     }
 
+    /** Factory reset = Telink kick-out, as the official app's KickOutDeviceCommand: E3 11 02 01. */
+    @Test fun kickOutCommandLayout() {
+        assertEquals(0xe3, Ble.CMD_KICK_OUT); assertArrayEquals(byteArrayOf(1), Ble.kickOutData())
+        val sk = ByteArray(16) { (it + 1).toByte() }; val mac = Ble.macLe("AA:BB:CC:DD:EE:FF")
+        val plain = unhex("341200000007" + "00e3110201" + "000000000000000000")
+        assertArrayEquals(Ble.encryptPacket(sk, mac, plain), Ble.command(sk, mac, 0x1234, 7, Ble.CMD_KICK_OUT, Ble.kickOutData()))
+    }
+
+    /** Reset bulb end to end: node returns to telink_mesh1/123, the app forgets it (home and rooms), and it can be adopted again. */
+    @Test fun resetBulbEndToEnd() {
+        val h = home(); h.rooms = listOf(Room(9, "R", listOf(h.bulbs[0].meshId, h.bulbs[1].meshId)))
+        val target = h.bulbs[0]; val node = FakeNode(target.mac, h.meshName, h.meshPassword)
+        val s = BleSession(node, h); s.login()
+        BulbReset.reset(Router(listOf(s)), h, target)
+        assertEquals("e3110201000000000000", hex(node.plain[0].copyOfRange(7, 17)))
+        assertEquals(target.meshId, (node.plain[0][5].toInt() and 0xff) or ((node.plain[0][6].toInt() and 0xff) shl 8))
+        assertTrue(node.kicked >= 1); assertFalse(h.bulbs.contains(target)); assertFalse(target.meshId in h.rooms[0].meshIds)
+        assertThrows(SecurityException::class.java) { BleSession(node, home()).login() }
+        val (n, p) = Ble.newMeshCredentials(); BleSession.provision(node, n, p)
+        val fresh = Home(2, "F", n, p, emptyList(), mutableListOf(Bulb("Again", 0, Caps.ALL_CONTROLS, node.mac)))
+        val s2 = BleSession(node, fresh); s2.login()
+        assertEquals(Via.BLE, Router(listOf(s2)).send(fresh, fresh.bulbs[0], Cmd.Power(true)))
+        // not sent: nothing removed
+        val h2 = home(); val b2 = h2.bulbs[0]
+        assertThrows(Exception::class.java) { BulbReset.reset(Router(emptyList()), h2, b2) }
+        assertTrue(h2.bulbs.contains(b2))
+    }
+
     /** Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop). */
     @Test fun identifyCommandLayout() {
         assertEquals(0xf7, Ble.CMD_IDENTIFY)
@@ -99,7 +127,7 @@ class ProtocolTest {
     }
 
     private class FakeNode(override val mac: String, var name: String, var pass: String) : GattPort {
-        var newName: ByteArray? = null; var newPass: ByteArray? = null
+        var newName: ByteArray? = null; var newPass: ByteArray? = null; var kicked = 0
         private fun dec(x: ByteArray): ByteArray {
             val c = javax.crypto.Cipher.getInstance("AES/ECB/NoPadding"); c.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(sk!!.reversedArray(), "AES"))
             return c.doFinal(x.copyOfRange(1, 17).reversedArray()).reversedArray()
@@ -120,6 +148,7 @@ class ProtocolTest {
                 val chk = Ble.encryptPacket(sk!!, m, p.copyOf().also { it[3] = 0; it[4] = 0 })
                 assertArrayEquals(data.copyOfRange(3, 5), chk.copyOfRange(3, 5))
                 plain += p
+                if (p[7].toInt() and 0xff == Ble.CMD_KICK_OUT && p[10].toInt() == Ble.KICK_OUT_FACTORY_RESET) { name = Ble.FACTORY_NAME; pass = Ble.FACTORY_PASSWORD; kicked++ }
             }
         }
         override fun read(ch: UUID) = reply

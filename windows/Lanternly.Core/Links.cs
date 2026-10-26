@@ -8,6 +8,8 @@ public abstract record Cmd
     public sealed record Temp(int Ct) : Cmd;          // 1 warm .. 100 cool (0 is invalid)
     public sealed record Rgb(byte R, byte G, byte B) : Cmd;
     public sealed record Identify(bool Start) : Cmd;  // blink to find a bulb; no state change
+    /// <summary>Erase the bulb's mesh pairing (Telink kick-out 0xE3 01). The bulb returns to telink_mesh1/123.</summary>
+    public sealed record FactoryReset : Cmd;
 }
 
 /// <summary>A way to reach bulbs. Lanternly is offline-only: the one implementation is the Bluetooth mesh (plus test fakes).</summary>
@@ -138,6 +140,7 @@ public sealed class BleSession : ILink, IAsyncDisposable
             Cmd.Temp t => (Ble.CmdColor, Ble.ColorTempData(t.Ct)),
             Cmd.Rgb r => (Ble.CmdColor, Ble.RgbData(r.R, r.G, r.B)),
             Cmd.Identify i => (Ble.CmdIdentify, Ble.IdentifyData(i.Start)),
+            Cmd.FactoryReset => (Ble.CmdKickOut, Ble.KickOutData()),
             _ => throw new ArgumentException("unknown command"),
         };
         // A GATT write that never completes must not block every later command: both waits time out.

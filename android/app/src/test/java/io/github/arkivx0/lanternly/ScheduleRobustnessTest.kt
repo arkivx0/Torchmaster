@@ -85,4 +85,13 @@ class ScheduleRobustnessTest {
     }
 
     @Test fun graceIsTenMinutes() = assertEquals(10 * 60_000L, Schedules.GRACE_MS)
+
+    /** Saving must not delete entries that were skipped as invalid at load. */
+    @Test fun saveKeepsSkippedInvalidEntries() {
+        val file = """{"Format":1,"Schedules":[{"Id":1,"Enabled":true,"Hour":7,"Minute":0,"Days":127,"Action":"on","HomeId":5,"Target":"all"},{"Id":2,"Hour":24,"Minute":0,"Action":"on","Target":"all"},{"Id":"x"}]}"""
+        val p = Schedules.parse(file); assertEquals(1, p.schedules.size); assertEquals(2, p.skipped)
+        val saved = Schedules.toJsonKeepingSkipped(listOf(p.schedules[0].copy(hour = 8)), file)
+        val p2 = Schedules.parse(saved); assertEquals(8, p2.schedules.single().hour); assertEquals(2, p2.skipped)
+        assertEquals(Schedules.toJson(p.schedules), Schedules.toJsonKeepingSkipped(p.schedules, null))
+    }
 }

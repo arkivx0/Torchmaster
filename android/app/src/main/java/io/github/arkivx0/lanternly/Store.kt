@@ -103,9 +103,12 @@ class Store(ctx: Context) {
     var schedulesQuarantined: String? get() = prefs.getString("schedQuarantined", null); set(v) { prefs.edit().putString("schedQuarantined", v).apply() }
 
     fun saveSchedules(l: List<Schedule>) = synchronized(LOCK) {
+        val old = try { if (schedFile.baseFile.exists()) String(schedFile.readFully()) else null } catch (e: Exception) { android.util.Log.w("Lanternly", "schedules read before save: ${e.javaClass.simpleName}"); null }
         val out = schedFile.startWrite()
-        try { out.write(Schedules.toJson(l).toByteArray()); schedFile.finishWrite(out) } catch (e: Exception) { schedFile.failWrite(out); throw e }
+        try { out.write(Schedules.toJsonKeepingSkipped(l, old).toByteArray()); schedFile.finishWrite(out) } catch (e: Exception) { schedFile.failWrite(out); throw e }
     }
+    /** Notification permission asked once (Android 13+); never nag again after a denial. */
+    var askedNotifications: Boolean get() = prefs.getBoolean("askedNotif", false); set(v) { prefs.edit().putBoolean("askedNotif", v).apply() }
     /** Result of the last schedule run, shown on the Schedules page. Written with commit(): callers are background threads that may be killed right after. */
     var lastRun: String? get() = prefs.getString("lastRun", null); set(v) { prefs.edit().putString("lastRun", v).commit() }
 

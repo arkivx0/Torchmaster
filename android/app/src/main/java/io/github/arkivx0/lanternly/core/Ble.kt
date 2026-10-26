@@ -11,7 +11,7 @@ object Ble {
     val COMMAND: UUID = UUID.fromString("00010203-0405-0607-0809-0a0b0c0d1912")
     val PAIR: UUID = UUID.fromString("00010203-0405-0607-0809-0a0b0c0d1914")
     const val VENDOR = 0x0211
-    const val CMD_POWER = 0xd0; const val CMD_BRIGHTNESS = 0xd2; const val CMD_COLOR = 0xe2; const val CMD_STATUS = 0xdc; const val CMD_IDENTIFY = 0xf7
+    const val CMD_POWER = 0xd0; const val CMD_BRIGHTNESS = 0xd2; const val CMD_COLOR = 0xe2; const val CMD_STATUS = 0xdc; const val CMD_IDENTIFY = 0xf7; const val CMD_KICK_OUT = 0xe3
 
     fun aes(key: ByteArray, block: ByteArray): ByteArray {
         val c = Cipher.getInstance("AES/ECB/NoPadding")
@@ -77,6 +77,10 @@ object Ble {
     fun rgbData(r: Int, g: Int, b: Int) = byteArrayOf(0x04, r.toByte(), g.toByte(), b.toByte())
     /** Identify (cmd 0xF7): 03 01 starts blinking, 03 02 stops. On the wire: F7 11 02 03 01/02. */
     fun identifyData(start: Boolean) = byteArrayOf(0x03, if (start) 1 else 2)
+    /** Kick-out param 0x01: leave the mesh and return to factory defaults (telink_mesh1 / 123). */
+    const val KICK_OUT_FACTORY_RESET = 0x01
+    /** Factory reset (Telink kick-out, cmd 0xE3, data 01). On the wire: E3 11 02 01, as the official app's KickOutDeviceCommand. */
+    fun kickOutData() = byteArrayOf(KICK_OUT_FACTORY_RESET.toByte())
 
     fun parseStatus(d: ByteArray): List<BulbState> {
         if (d.size < 18 || u(d, 7) != CMD_STATUS) return emptyList()

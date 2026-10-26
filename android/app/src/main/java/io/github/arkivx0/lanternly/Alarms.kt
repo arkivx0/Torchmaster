@@ -120,6 +120,12 @@ class ScheduleReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != Alarms.ACTION_FIRE) return
         val app = ctx.applicationContext
+        // Android 14+ refuses a connectedDevice foreground service without BLUETOOTH_CONNECT: record it instead of crashing the start.
+        if (Build.VERSION.SDK_INT >= 31 && app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            val r = goAsync()
+            Thread { try { ScheduleJob.failed(app, intent, "Bluetooth permission missing (open Lanternly to allow it)") } finally { r.finish() } }.start()
+            return
+        }
         try {
             app.startForegroundService(Intent(app, ScheduleService::class.java).putExtras(intent))
         } catch (e: Exception) {
@@ -134,22 +140,29 @@ class ScheduleReceiver : BroadcastReceiver() {
 class ScheduleService : Service() {
     private val queue = Executors.newSingleThreadExecutor()
     private val worker = Executors.newCachedThreadPool()
+    /** Runs accepted but not finished, and the newest start id: the service stops only when no run is left. */
+    private val active = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         try { goForeground() } catch (e: Exception) { // e.g. Bluetooth permission revoked (Android 14 requires it for this type)
             Diag.log("schedule foreground", e)
             intent?.let { ScheduleJob.failed(applicationContext, it, "could not start (${e.javaClass.simpleName}); Bluetooth permission?") }
-            stopSelf(startId); return START_NOT_STICKY
+            // A failed second alarm must not stop a run that is still in progress.
+            if (active.get() == 0) stopSelf(startId)
+            return START_NOT_STICKY
         }
-        val i = intent ?: run { stopSelf(startId); return START_NOT_STICKY }
+        val i = intent ?: run { if (active.get() == 0) stopSelf(startId); return START_NOT_STICKY }
+        active.incrementAndGet()
         queue.execute {
             val f = worker.submit { ScheduleJob.run(applicationContext, i, ScheduleJob.SERVICE_BUDGET_MS) }
             try { f.get(ScheduleJob.SERVICE_BUDGET_MS + 5_000, TimeUnit.MILLISECONDS) }
             catch (e: TimeoutException) { f.cancel(true); ScheduleJob.failed(applicationContext, i, "timed out") }
             catch (e: Exception) { Diag.log("schedule", e) }
-            finally { stopSelf(startId) }
+            finally { if (active.decrementAndGet() == 0) stopSelf(lastStartId) }
         }
         return START_NOT_STICKY
     }
@@ -212,12 +225,18 @@ object ScheduleJob {
         if (Schedules.targets(h, s).isEmpty()) { note(store, s, "no bulbs to control"); return }
         var last: String? = null
         // 1. The app's own open session, if it is logged in to this home.
+        // The run deadline applies here too: a hung write on the borrowed link must not eat the whole budget.
         Connection.shared(h.id)?.let { ses ->
+            val ex = Executors.newSingleThreadExecutor()
             try {
-                val res = Schedules.run(Router(listOf(ses)), ses.home, s)
+                val f = ex.submit<BatchResult> { Schedules.run(Router(listOf(ses)), ses.home, s) }
+                val res = f.get(maxOf(1_000L, (deadline - System.currentTimeMillis()) / 2), TimeUnit.MILLISECONDS)
                 if (res.ok > 0) { note(store, s, "$res (app connection)"); return }
                 last = res.firstError
-            } catch (e: Exception) { Diag.log("schedule shared", e); last = e.message }
+            } catch (e: TimeoutException) { Diag.log("schedule shared timeout", e); last = "app connection timed out"
+            } catch (e: InterruptedException) { throw e
+            } catch (e: Exception) { Diag.log("schedule shared", e); last = e.message
+            } finally { ex.shutdownNow() }
         }
         // 2. Own connection: target bulbs first (closest to what we control), then the rest.
         val macs = (Schedules.targets(h, s) + h.bulbs).map { it.mac.uppercase() }.filter { it.length == 17 }.distinct()

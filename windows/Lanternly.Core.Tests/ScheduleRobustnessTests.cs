@@ -80,4 +80,18 @@ public class ScheduleRobustnessTests
         Assert.Equal(5_000_000_000L, l.Single().HomeId);
         Assert.Equal(typeof(long), typeof(Schedule).GetProperty(nameof(Schedule.HomeId))!.PropertyType);
     }
+
+    [Fact] // saving must not delete entries that were skipped as invalid at load
+    public void SaveKeepsSkippedInvalidEntries()
+    {
+        var file = "{\"Format\":1,\"Schedules\":[{\"Id\":1,\"Enabled\":true,\"Hour\":7,\"Minute\":0,\"Days\":127,\"Action\":\"on\",\"HomeId\":5,\"Target\":\"all\"},{\"Id\":2,\"Hour\":24,\"Minute\":0,\"Action\":\"on\",\"Target\":\"all\"},{\"Id\":\"x\"}]}";
+        var (l, bad) = Schedules.Parse(file);
+        Assert.Single(l); Assert.Equal(2, bad);
+        l[0].Hour = 8;
+        var saved = Schedules.ToJsonKeepingSkipped(l, file);
+        var (l2, bad2) = Schedules.Parse(saved);
+        Assert.Single(l2); Assert.Equal(8, l2[0].Hour); Assert.Equal(2, bad2);
+        Assert.Contains("\"Hour\": 24", saved);
+        Assert.Equal(Schedules.ToJson(l), Schedules.ToJsonKeepingSkipped(l, null));
+    }
 }

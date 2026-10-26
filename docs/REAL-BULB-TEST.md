@@ -1,4 +1,4 @@
-# Real-bulb test checklist (0.1.3, Android versionCode 5)
+# Real-bulb test checklist (0.1.4, Android versionCode 6)
 
 Use one test bulb you don't mind resetting. Report for each step: works / fails, plus the exact status-line text.
 Windows crash details: `%LOCALAPPDATA%\Lanternly\crash.log` (types and stack traces only).
@@ -75,3 +75,25 @@ Use times 2–3 minutes ahead. Report the status line (Windows) or the "Last run
       over a temporary connection" and at that time home A's bulb still changes. The Schedules page shows "Last run".
    4. Set the PC clock back across a run that already happened: it does not run again.
    5. Quit from the tray: no schedule runs until Lanternly is started again.
+
+## F. Reset bulb over Bluetooth (0.1.4)
+Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported from a key file).
+1. Make sure the bulb can be controlled first: on/off works and the status shows "BLE ✓".
+2. ⋯ next to the bulb → **Reset bulb…** → read the warning → Continue → **Erase pairing** (Windows: OK, then Yes).
+   Cancelling at either step must change nothing.
+3. Expect the status line "Reset sent…" and a dialog that points to Add a reset bulb. The bulb disappears from the
+   list and from its room. Note what the bulb does (blinks, how many times, turns off or on).
+4. Within about 10 s: ⚙ → Add a reset bulb → **Find reset bulbs**. Expect the bulb to be found and "Added 1 of 1 bulb(s)".
+   If nothing is found, wait 30 s and try once more, then note it. Turning the bulb off and on once at the switch is
+   fine at this point.
+5. Control it again. Export a new key-file backup.
+6. Negative check: with Bluetooth off (or the bulb out of range), Reset bulb… reports "reset not sent … Nothing was
+   removed" and the bulb stays in the list.
+7. Android 13+: on a fresh install, the app asks for notifications once. Deny it: schedules still run.
+
+## G. 0.1.4 schedule fixes
+1. Android 12+: revoke Nearby devices (Bluetooth) for Lanternly, then let a schedule fire: "Last run" says
+   "Bluetooth permission missing…" and the app does not crash. Grant it again.
+2. Windows, two homes: start a schedule run on home A, switch to home B straight away. The run finishes ("Last run"
+   shows a result) and then home B connects.
+

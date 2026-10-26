@@ -12,6 +12,13 @@ don't need a reset. A reset worked when the bulb blinks (usually 3 times).
 
 Source: GE Cync support article "Resetting Cync Light Bulbs" (Bluetooth + Direct Connect bulbs).
 
+## Reset from Lanternly (no power-cycling)
+If Lanternly already has the bulb's mesh key (you added it in Lanternly, or imported a key file with that
+home's mesh name and password), it can reset the bulb over Bluetooth: ⋯ next to the bulb → **Reset bulb…** → confirm
+twice. The bulb is removed from the home. Then use **Add a reset bulb → Find reset bulbs** to add it fresh.
+This sends the Telink kick-out command (see spec/PROTOCOL.md). Bulbs still on a Cync account whose key Lanternly
+doesn't have can only be reset by power-cycling.
+
 ## Current firmware (try first)
 1. Start with the bulb OFF.
 2. Turn it ON 1 s, then OFF 1 s. Do this 5 times.

@@ -113,8 +113,11 @@ class MainActivity : Activity() {
     // ---------- connections ----------
     private fun ensurePermsThenConnect() {
         val need = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        val missing = need.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (store.ble && missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), REQ_PERMS) else connect()
+        val missing = need.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }.toMutableList()
+        // Schedule runs show a foreground-service notification; on Android 13+ that needs POST_NOTIFICATIONS (asked once with the rest).
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !store.askedNotifications) { missing += Manifest.permission.POST_NOTIFICATIONS; store.askedNotifications = true }
+        val req = if (store.ble) missing else missing.filter { it == Manifest.permission.POST_NOTIFICATIONS }
+        if (req.isNotEmpty()) requestPermissions(req.toTypedArray(), REQ_PERMS) else connect()
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) { connect() }
 
@@ -172,9 +175,9 @@ class MainActivity : Activity() {
             var err: String? = null; var ok = 0
             for (b in bulbs) try {
                 router.send(h, b, c)
-                if (c is Cmd.Identify) { ok++; continue } // identify does not change on/brightness/color
+                if (c is Cmd.Identify || c is Cmd.FactoryReset) { ok++; continue } // no on/brightness/color change
                 val st = b.state ?: BulbState(b.meshId, true, false, 50, 50, Triple(0, 0, 0))
-                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify -> st }
+                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify, Cmd.FactoryReset -> st }
                 ok++
             } catch (e: Exception) { if (err == null) err = "${b.name}: ${e.message}"; Diag.log("send", e) }
             val r = BatchResult(ok, bulbs.size, err)
@@ -206,6 +209,37 @@ class MainActivity : Activity() {
         })
         ui.postAtTime(timer, BLINK_TIMERS, SystemClock.uptimeMillis() + 5000)
         refresh()
+    }
+
+    // ---------- reset bulb (factory reset over BLE) ----------
+    private fun resetBulb(h: Home, b: Bulb) {
+        AlertDialog.Builder(this).setTitle(BulbReset.CONFIRM_TITLE).setMessage(BulbReset.confirmText(b))
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                AlertDialog.Builder(this).setTitle(BulbReset.CONFIRM_TITLE).setMessage("Last check: erase the pairing of \"${b.name}\" now? This cannot be undone.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Erase pairing") { _, _ -> doReset(h, b) }.show()
+            }.show()
+    }
+
+    private fun doReset(h: Home, b: Bulb) {
+        if (demo) { setStatus("Demo mode: nothing was reset."); return }
+        if (cmdIo.isShutdown) return
+        setStatus("Resetting ${b.name}…")
+        blinks.stop(b)
+        try { cmdIo.execute {
+            val err = try { BulbReset.reset(router, h, b); null } catch (e: Exception) { Diag.log("reset bulb", e); "${b.name}: reset not sent (${e.message}). Nothing was removed." }
+            if (closing) return@execute
+            post {
+                if (err != null) { setStatus(err); refresh(); return@post }
+                save()
+                AlertDialog.Builder(this).setTitle("Bulb reset").setMessage(BulbReset.DONE)
+                    .setPositiveButton("Add a bulb") { _, _ -> settingsOpen = true; schedulesOpen = false; render() }
+                    .setNegativeButton("Later", null).show()
+                render(); connect() // the reset bulb may have been our connection
+                setStatus(BulbReset.DONE)
+            }
+        } } catch (e: RejectedExecutionException) { Diag.log("reset after close", e) }
     }
 
     // ---------- UI ----------
@@ -259,7 +293,7 @@ class MainActivity : Activity() {
         val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(dp(18), 0, 0, dp(4)) }
         val find = button("◎") { toggleBlink(h, b) }.apply { contentDescription = "Find this bulb" }
         line.addView(find)
-        if (b.has(Caps.TEMP) || b.has(Caps.COLOR)) line.addView(button("⋯") { extra.visibility = if (extra.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
+        line.addView(button("⋯") { extra.visibility = if (extra.visibility == View.VISIBLE) View.GONE else View.VISIBLE }.apply { contentDescription = "More options: ${b.name}" })
         val via = text("", 10f, DIM).apply { setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(CTL, 4) }
         line.addView(via, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6); rightMargin = dp(6) })
         val sw = switch(); sw.setOnClickListener { send(h, listOf(b), Cmd.Power(sw.isChecked)) }
@@ -276,6 +310,7 @@ class MainActivity : Activity() {
             SWATCHES.forEach { c -> r.addView(View(this).apply { background = round(c, 6); setOnClickListener { send(h, listOf(b), Cmd.Rgb(Color.red(c), Color.green(c), Color.blue(c))) } }, LinearLayout.LayoutParams(dp(30), dp(26)).apply { rightMargin = dp(6) }) }
             extra.addView(r)
         }
+        extra.addView(button("Reset bulb…") { resetBulb(h, b) }.apply { contentDescription = "Reset bulb: ${b.name}" })
         parent.addView(extra)
         refreshers += {
             val s = b.state
@@ -320,7 +355,7 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.4 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
             AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()

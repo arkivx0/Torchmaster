@@ -116,6 +116,28 @@ object Schedules {
             .put("Action", it.action).put("HomeId", it.homeId).put("Target", it.target)
     })).toString(1)
 
+    /**
+     * Like [toJson], but entries of [existing] that were skipped as invalid at load are written back unchanged (after the
+     * valid ones), so saving never silently deletes them. Unreadable [existing]: plain toJson.
+     */
+    fun toJsonKeepingSkipped(l: List<Schedule>, existing: String?): String {
+        val keep = ArrayList<Any>()
+        if (existing != null) try {
+            val a = JSONObject(existing).optJSONArray("Schedules")
+            val seen = HashSet<Long>()
+            if (a != null) for (i in 0 until a.length()) {
+                val e = a.opt(i)
+                val x = try { (e as JSONObject).let { o -> Schedule(o.getLong("Id"), o.optBoolean("Enabled", true), o.getInt("Hour"), o.getInt("Minute"), o.optInt("Days", EVERY_DAY),
+                    o.optString("Action", "on"), o.optLong("HomeId"), o.optString("Target", "all")) } } catch (_: Exception) { null }
+                if (x != null && invalidReason(x) == null && seen.add(x.id)) continue // valid: the caller's list is authoritative
+                if (e != null) keep += e
+            }
+        } catch (_: Exception) { }
+        if (keep.isEmpty()) return toJson(l)
+        val o = JSONObject(toJson(l)); val arr = o.getJSONArray("Schedules"); keep.forEach { arr.put(it) }
+        return o.toString(1)
+    }
+
     /** Parsed schedules plus the number of entries skipped as invalid. */
     data class Parsed(val schedules: List<Schedule>, val skipped: Int)
 

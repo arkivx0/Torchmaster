@@ -122,6 +122,36 @@ public static class Schedules
     public static string ToJson(List<Schedule> l) => JsonSerializer.Serialize(new { Format = 1, Schedules = l }, O);
     public static List<Schedule> FromJson(string json) => Parse(json).Schedules;
 
+    /// <summary>
+    /// Like <see cref="ToJson"/>, but entries of <paramref name="existing"/> that were skipped as invalid at load are written back
+    /// unchanged (after the valid ones), so saving never silently deletes them. Unreadable <paramref name="existing"/>: plain ToJson.
+    /// </summary>
+    public static string ToJsonKeepingSkipped(List<Schedule> l, string? existing)
+    {
+        var keep = new List<System.Text.Json.Nodes.JsonNode>();
+        if (existing != null)
+            try
+            {
+                var root = System.Text.Json.Nodes.JsonNode.Parse(existing);
+                if (root?["Schedules"] is System.Text.Json.Nodes.JsonArray a)
+                {
+                    var seen = new HashSet<long>();
+                    foreach (var e in a)
+                    {
+                        Schedule? x = null;
+                        try { x = e?.Deserialize<Schedule>(); } catch (Exception) { }
+                        if (x != null && InvalidReason(x) == null && seen.Add(x.Id)) continue; // valid: the caller's list is authoritative
+                        if (e != null) keep.Add(e.DeepClone());
+                    }
+                }
+            }
+            catch (Exception) { }
+        if (keep.Count == 0) return ToJson(l);
+        var arr = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(l))!.AsArray();
+        foreach (var k in keep) arr.Add(k);
+        return new System.Text.Json.Nodes.JsonObject { ["Format"] = 1, ["Schedules"] = arr }.ToJsonString(O);
+    }
+
     /// <summary>Throws only when the text is not JSON; bad entries (hour 24, unknown action, ...) are skipped and counted.</summary>
     public static (List<Schedule> Schedules, int Skipped) Parse(string json)
     {

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.4 (unreleased, Android versionCode 6)
+- **Reset bulb…** (per bulb, under ⋯): factory resets a bulb whose mesh key Lanternly has, over Bluetooth, for bulbs
+  that won't reset by power-cycling. Sends the Telink kick-out command (`E3 11 02 01`, the same bytes as the official
+  app's kick-out). Asks twice before it does anything ("This erases the bulb's pairing; you'll need to add it again").
+  When the command goes out, the bulb is removed from the home and its rooms, and Lanternly points to
+  Add a reset bulb → Find reset bulbs. If it can't be sent, nothing is removed. Tested against the simulated bulb only.
+- Import a key file that has the bulb's existing mesh name and password (e.g. one you exported yourself) to control or
+  reset that bulb without power-cycling it.
+- Fixes left over from the 0.1.3 review:
+  - Android: Bluetooth permission is checked before the schedule foreground service starts. If it's missing, the run
+    reports "Bluetooth permission missing" and sets a retry instead of failing to start.
+  - Android: the run deadline now covers a run that borrows the app's open connection, too.
+  - Android: an alarm whose foreground start fails no longer stops another schedule run that's in progress. The
+    service stops only after the last run ends.
+  - Android 13+: asks once for the notification permission, which the "Running a schedule" notification needs.
+  - Both: saving schedules keeps entries that were skipped as invalid at load. They're written back unchanged and
+    no longer deleted.
+  - Windows: switching homes waits for a schedule run in progress and doesn't swap the connection in the middle of it.
+    Reset bulb waits the same way.
+
 ## 0.1.3 (unreleased)
 - Schedules: turn bulbs, a room or all bulbs on or off, or apply a scene (e.g. Red at full brightness), at a set
   time on chosen days. Runs on the device only, over Bluetooth, with no network.

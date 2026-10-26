@@ -24,7 +24,7 @@ class Bulb(var name: String, var meshId: Int, var type: Int, var mac: String) {
     @Volatile var via: Via = Via.NONE
 }
 class Room(val id: Int, val name: String, val meshIds: List<Int>)
-class Home(val id: Long, val name: String, val meshName: String, val meshPassword: String, val rooms: List<Room>, val bulbs: MutableList<Bulb>)
+class Home(val id: Long, val name: String, val meshName: String, val meshPassword: String, var rooms: List<Room>, val bulbs: MutableList<Bulb>)
 
 /** Last reported state. mode: color temperature 1..100, or 0xFE when showing RGB. */
 data class BulbState(val meshId: Int, val online: Boolean, val on: Boolean, val brightness: Int, val mode: Int, val rgb: Triple<Int, Int, Int>)

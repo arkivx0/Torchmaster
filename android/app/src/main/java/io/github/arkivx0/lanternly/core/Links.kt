@@ -9,6 +9,8 @@ sealed class Cmd {
     data class Temp(val ct: Int) : Cmd()   // 1 warm .. 100 cool (0 is invalid)
     data class Rgb(val r: Int, val g: Int, val b: Int) : Cmd()
     data class Identify(val start: Boolean) : Cmd()   // blink to find a bulb; no state change
+    /** Erase the bulb's mesh pairing (Telink kick-out 0xE3 01). The bulb returns to telink_mesh1/123. */
+    object FactoryReset : Cmd()
 }
 
 interface Link {
@@ -104,6 +106,7 @@ class BleSession(private val g: GattPort, val home: Home) : Link {
             is Cmd.Temp -> Ble.CMD_COLOR to Ble.colorTempData(c.ct)
             is Cmd.Rgb -> Ble.CMD_COLOR to Ble.rgbData(c.r, c.g, c.b)
             is Cmd.Identify -> Ble.CMD_IDENTIFY to Ble.identifyData(c.start)
+            is Cmd.FactoryReset -> Ble.CMD_KICK_OUT to Ble.kickOutData()
         }
         val key = sk ?: throw NotReachable("BLE not logged in")
         g.write(Ble.COMMAND, Ble.command(key, mac, nextSeq(), b.meshId, cmd, data), false)

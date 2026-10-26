@@ -14,6 +14,12 @@ AES-128-ECB with key and data byte-reversed ("Telink AES").
   built from the MAC (LE) and seq (see `Ble.EncryptPacket`). Same command codes: `d0`, `d2`, `e2 05 ct`, `e2 04 r g b`.
 - Identify (blink to find a bulb): cmd `f7`, data `03 01` = start, `03 02` = stop. Plaintext bytes 7..11 on the
   wire: `f7 11 02 03 01` / `f7 11 02 03 02` (same as the official app). No state change.
+- Factory reset ("Reset bulb", Telink kick-out): cmd `e3`, data `01` (= return to factory defaults). Plaintext bytes
+  7..10 on the wire: `e3 11 02 01`, addressed to the bulb's mesh id. Same bytes as the official app
+  (`KickOutDeviceCommand`, body `{-29, 17, 2, 1}`; Telink opcode table: `0xE3` "kick out / reset factory"). Not acknowledged:
+  the app sends it, sends a second copy 300 ms later (a failed second copy is expected when the reset bulb was the
+  connected node), then forgets the bulb. Afterwards the bulb advertises as `telink_mesh1` / `123` and can be provisioned
+  again. Validated against a simulated node; confirm on a real bulb (docs/REAL-BULB-TEST.md §F).
 - Status notifications: cmd `dc`, two 4-byte records `[mesh, online, bri(+128 = rgb mode), ct or rgb332]`.
 - Provision a factory-reset node (`telink_mesh1` / `123`): log in, then write to pair
   `04 AES(sk, pad16(new_name))`, `05 AES(sk, pad16(new_password))`, `06 AES(sk, ltk)`; read back `07` = confirmed.
