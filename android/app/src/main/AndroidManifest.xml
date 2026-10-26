@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Schedule runs: a short foreground service (type connectedDevice) does the Bluetooth work, with a small notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Offline by design: no network permission is requested, so the app cannot open any connection. -->
     <application
         android:label="Lanternly"
@@ -24,6 +27,7 @@
             </intent-filter>
         </activity>
         <receiver android:name=".ScheduleReceiver" android:exported="false" />
+        <service android:name=".ScheduleService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <receiver android:name=".SystemEventsReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

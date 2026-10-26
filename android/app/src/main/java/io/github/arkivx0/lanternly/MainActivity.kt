@@ -62,8 +62,8 @@ class MainActivity : Activity() {
         store = Store(this)
         demo = intent?.getBooleanExtra("demo", false) == true
         vault = if (demo) demoVault() else store.load()
-        schedules = if (demo) emptyList() else store.loadSchedules()
-        if (!demo) Thread { Alarms.planAll(applicationContext, schedules) }.start()
+        schedules = if (demo) emptyList() else store.loadSchedules() // never throws: bad entries skipped, unreadable file quarantined
+        if (!demo) Thread { try { Alarms.planAll(applicationContext, schedules) } catch (e: Throwable) { Diag.log("plan schedules", e) } }.start() // must never crash launch
         Diag.sink = { where, e -> android.util.Log.w("Lanternly", where + (e?.let { ": " + it.javaClass.simpleName } ?: "")) }
         window.statusBarColor = BG; window.navigationBarColor = BG
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG); fitsSystemWindows = true }
@@ -99,6 +99,7 @@ class MainActivity : Activity() {
         cmdIo.shutdown()
         // Let queued stops go out, then disconnect, off the main thread so a hung write never freezes the UI.
         val s = ble; ble = null
+        if (Connection.session === s) Connection.session = null
         Thread { try { cmdIo.awaitTermination(2, TimeUnit.SECONDS) } catch (_: InterruptedException) {}; s?.close() }.start()
         io.shutdown()
     }
@@ -120,6 +121,7 @@ class MainActivity : Activity() {
     /** Waits (max 2 s) for queued bulb commands such as blink stops, then disconnects. Call off the main thread. */
     private fun teardown() {
         try { cmdIo.submit {}.get(2, TimeUnit.SECONDS) } catch (e: Exception) { Diag.log("teardown wait", e) }
+        if (Connection.session === ble) Connection.session = null
         ble?.close(); ble = null
     }
 
@@ -141,7 +143,7 @@ class MainActivity : Activity() {
                         val s = BleSession(AndroidGatt.connect(this, mac), h)
                         s.onState = { _, st -> onState(h, st) } // before login: the first status notifications arrive during it
                         try { s.login() } catch (e: Exception) { s.close(); throw e }
-                        ble = s; links += s; break
+                        ble = s; Connection.session = s; links += s; break
                     } catch (e: Exception) { Diag.log("ble connect", e); post { setStatus("Bluetooth: ${e.message}") } }
                 }
             }
@@ -321,7 +323,7 @@ class MainActivity : Activity() {
         c4.addView(note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
-            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
+            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
         })
         r2.addView(button("Done", accent = true) { settingsOpen = false; render() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
         c4.addView(r2); body.addView(c4, lp())
@@ -372,7 +374,7 @@ class MainActivity : Activity() {
         if (demo) return
         io.execute {
             try { store.saveSchedules(l) } catch (e: Exception) { Diag.log("schedules save", e); post { setStatus("Schedules not saved: ${e.message}") } }
-            removed?.let { Alarms.cancel(applicationContext, it.id) }
+            removed?.let { Alarms.remove(applicationContext, it.id) }
             changed?.let { Alarms.plan(applicationContext, it) }
         }
     }
@@ -380,9 +382,13 @@ class MainActivity : Activity() {
     private fun schedulesView() {
         val c = card()
         c.addView(text("Schedules", 16f, FG, bold = true))
-        c.addView(note("Schedules run on this phone, with no internet. At the set time the phone must be near the bulbs (Bluetooth range of at least one) with Bluetooth on. A run more than 10 minutes late, e.g. phone off, is skipped."))
+        c.addView(note("Schedules run on this phone, with no internet. At the set time the phone must be near the bulbs (Bluetooth range of at least one) with Bluetooth on. A run more than ${Schedules.GRACE_MS / 60_000} minutes late, e.g. phone off, is skipped. If no bulb answers, it is retried up to twice within that time. While a run is in progress a small \"Running a schedule\" notification shows."))
+        store.schedulesQuarantined?.takeIf { !demo }?.let { q ->
+            c.addView(note("⚠ The saved schedules could not be read, so they were moved aside ($q) and the list starts empty."))
+            c.addView(button("OK") { store.schedulesQuarantined = null; render() })
+        }
         if (!demo && !Alarms.exactAllowed(this)) {
-            c.addView(note("⚠ Exact alarms are not allowed, so runs may be a few minutes late or skipped. Allow \"Alarms & reminders\" for Lanternly to fix this."))
+            c.addView(note("⚠ Exact alarms are not allowed. While the phone is idle Android can delay runs by more than ${Schedules.GRACE_MS / 60_000} minutes, and then they are skipped, not run late; two schedules within about 9 minutes of each other may lose one. Allow \"Alarms & reminders\" for Lanternly to fix this."))
             if (Build.VERSION.SDK_INT >= 31) c.addView(button("Allow exact alarms") {
                 try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName"))) } catch (e: Exception) { Diag.log("exact alarm settings", e) }
             })

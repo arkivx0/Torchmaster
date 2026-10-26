@@ -15,7 +15,7 @@ android {
         applicationId = "io.github.arkivx0.lanternly"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
+        versionCode = 5
         versionName = "0.1.3"
     }
     signingConfigs {

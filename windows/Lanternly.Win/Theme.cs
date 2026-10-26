@@ -34,6 +34,7 @@ public static class Theme
   <SolidColorBrush x:Key="Fg" Color="#C0CAF5"/>
   <SolidColorBrush x:Key="Dim" Color="#7982A9"/>
   <SolidColorBrush x:Key="Accent" Color="#7AA2F7"/>
+  <SolidColorBrush x:Key="Yellow" Color="#E0AF68"/>
   <SolidColorBrush x:Key="AccentFg" Color="#1A1B26"/>
 
   <Style TargetType="Window">

@@ -11,6 +11,27 @@
   any blink first; Windows Bluetooth writes time out instead of blocking later commands.
 - New version number (0.1.3, Android versionCode 4) so this build can be told apart from 0.1.2.
 - Tests for schedule times, days of the week and daylight-saving changes.
+- Schedule fixes from the second 0.1.3 review (still 0.1.3; Android versionCode 5 so it installs over the reviewed build):
+  - Android: the Bluetooth work of a run moved out of the alarm receiver into a short foreground service
+    (type connectedDevice, small "Running a schedule" notification) with an overall 40 s deadline that is passed
+    into connect, service discovery and every GATT wait; a hard 45 s timeout backs it up. "Last run" says
+    "running…" first, so a run that gets killed is visible.
+  - Android: a run that reaches no bulb sets up to two retries (about +2 and +5 minutes), always inside the
+    10-minute window; retries never replace the next regular alarm.
+  - Android: when the app is open and connected, a run uses that connection instead of opening a second one.
+  - Android 12 with exact alarms denied: the warning now says plainly that idle-time delays can make runs skip.
+  - Windows: after the PC wakes from sleep Lanternly reconnects and checks schedules; a run that reaches no bulb
+    reconnects and retries once.
+  - Windows: schedules for a home that is not selected now run, over a temporary connection to that home, and
+    the row says so. The Schedules page keeps a "Last run" line.
+  - Both: setting the clock back no longer repeats a run that already happened. Saved schedules are checked on
+    load (hour 0–23, minute 0–59, days, action, target); bad entries are skipped and each one is planned on its
+    own, so one bad entry can't stop the others or crash the app at launch. An unreadable schedules.json is
+    moved aside to schedules.json.corrupt-<time> instead of being overwritten.
+  - Both: the missed-run window is 10 minutes on both platforms (Windows was 5) and the Schedules page shows it.
+    HomeId is a 64-bit integer in schedules.json on both platforms. Android alarm request codes are small dense
+    numbers per schedule. "Last run" is saved synchronously.
+  - Tests for entry validation, retry timing, clock-set-back dedupe and quarantine of an unreadable file.
 
 ## 0.1.2 (unreleased)
 - "Find this bulb": a per-bulb button makes the bulb blink (BLE identify command); it stops after a few seconds

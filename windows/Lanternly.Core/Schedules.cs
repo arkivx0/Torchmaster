@@ -6,7 +6,7 @@ namespace Lanternly.Core;
 /// <summary>
 /// A local schedule: at Hour:Minute (local time) on the chosen days, turn the target on or off or apply a scene.
 /// Runs on this device only (no cloud). Days: bit 0 = Monday … bit 6 = Sunday. Target: "all", "room:&lt;id&gt;" or "bulb:&lt;meshId&gt;".
-/// Action: "on", "off" or a scene name (e.g. "Red").
+/// Action: "on", "off" or a scene name (e.g. "Red"). Same JSON shape and field types as the Android app (Id and HomeId are 64-bit).
 /// </summary>
 public sealed class Schedule
 {
@@ -16,7 +16,7 @@ public sealed class Schedule
     public int Minute { get; set; }
     public int Days { get; set; } = Schedules.EveryDay;
     public string Action { get; set; } = "on";
-    public uint HomeId { get; set; }
+    public long HomeId { get; set; }
     public string Target { get; set; } = "all";
 }
 
@@ -24,7 +24,7 @@ public static class Schedules
 {
     public const int EveryDay = 0x7f;
     /// <summary>A run is skipped when it would start more than this late (e.g. PC asleep, app closed).</summary>
-    public static readonly TimeSpan Grace = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan Grace = TimeSpan.FromMinutes(10);
     public static readonly string[] DayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     public static readonly string[] Actions = ["on", "off", .. Scenes.All.Where(s => s.Name != "Off").Select(s => s.Name)];
 
@@ -59,6 +59,26 @@ public static class Schedules
 
     /// <summary>True if a run due at <paramref name="due"/> may still start at <paramref name="now"/>.</summary>
     public static bool OnTime(DateTimeOffset due, DateTimeOffset now) => now >= due && now - due <= Grace;
+
+    /// <summary>Clock set back: a due time at or before the last one that already fired must not run again. 0 = never fired.</summary>
+    public static bool IsReplay(DateTimeOffset due, long lastFiredMs) => lastFiredMs > 0 && due.ToUnixTimeMilliseconds() <= lastFiredMs;
+
+    /// <summary>Next run strictly after both <paramref name="now"/> and the last fired time.</summary>
+    public static DateTimeOffset? NextFireAfter(Schedule s, DateTimeOffset now, TimeZoneInfo tz, long lastFiredMs)
+    {
+        var last = DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(0, lastFiredMs));
+        return NextFire(s, lastFiredMs > 0 && last > now ? last : now, tz);
+    }
+
+    /// <summary>Null when the entry is usable, else why not.</summary>
+    public static string? InvalidReason(Schedule s) =>
+        s.Id == 0 ? "missing id"
+        : s.Hour is < 0 or > 23 ? $"hour {s.Hour}"
+        : s.Minute is < 0 or > 59 ? $"minute {s.Minute}"
+        : s.Days is < 0 or > EveryDay ? $"days {s.Days}"
+        : !Actions.Contains(s.Action) ? $"action {s.Action}"
+        : !(s.Target == "all" || System.Text.RegularExpressions.Regex.IsMatch(s.Target ?? "", @"^(room|bulb):\d{1,9}$")) ? $"target {s.Target}"
+        : null;
 
     public static List<Bulb> Targets(Home h, Schedule s)
     {
@@ -100,9 +120,39 @@ public static class Schedules
 
     static readonly JsonSerializerOptions O = new() { WriteIndented = true };
     public static string ToJson(List<Schedule> l) => JsonSerializer.Serialize(new { Format = 1, Schedules = l }, O);
-    public static List<Schedule> FromJson(string json)
+    public static List<Schedule> FromJson(string json) => Parse(json).Schedules;
+
+    /// <summary>Throws only when the text is not JSON; bad entries (hour 24, unknown action, ...) are skipped and counted.</summary>
+    public static (List<Schedule> Schedules, int Skipped) Parse(string json)
     {
         using var d = JsonDocument.Parse(json);
-        return d.RootElement.TryGetProperty("Schedules", out var a) ? a.Deserialize<List<Schedule>>() ?? [] : [];
+        if (d.RootElement.ValueKind != JsonValueKind.Object || !d.RootElement.TryGetProperty("Schedules", out var a) || a.ValueKind != JsonValueKind.Array) return ([], 0);
+        var l = new List<Schedule>(); int bad = 0;
+        foreach (var e in a.EnumerateArray())
+        {
+            try
+            {
+                var x = e.Deserialize<Schedule>();
+                if (x == null || InvalidReason(x) != null || l.Any(o => o.Id == x.Id)) bad++; else l.Add(x);
+            }
+            catch (Exception) { bad++; }
+        }
+        return (l, bad);
+    }
+
+    /// <summary>
+    /// Loads schedules.json. An unreadable file is renamed to "&lt;name&gt;.corrupt-&lt;stamp&gt;" and an empty list returned,
+    /// so the next save never overwrites it.
+    /// </summary>
+    public static (List<Schedule> Schedules, int Skipped, string? Quarantined) LoadOrQuarantine(string path, string stamp)
+    {
+        if (!File.Exists(path)) return ([], 0, null);
+        try { var (l, bad) = Parse(File.ReadAllText(path)); return (l, bad, null); }
+        catch (Exception)
+        {
+            var q = path + ".corrupt-" + stamp;
+            try { File.Move(path, q); } catch (Exception) { q = path; }
+            return ([], 0, Path.GetFileName(q));
+        }
     }
 }

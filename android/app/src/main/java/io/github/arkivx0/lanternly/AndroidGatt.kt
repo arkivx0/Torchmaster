@@ -16,6 +16,8 @@ class AndroidGatt private constructor(override val mac: String) : GattPort {
     private val events = LinkedBlockingQueue<Pair<String, Any?>>()
     private val notify = HashMap<UUID, (ByteArray) -> Unit>()
     private var service: BluetoothGattService? = null
+    /** Absolute time (ms) after which every wait fails at once; schedule runs pass their overall deadline here. */
+    @Volatile var deadline = Long.MAX_VALUE
 
     private val cb = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -31,7 +33,8 @@ class AndroidGatt private constructor(override val mac: String) : GattPort {
     }
 
     private fun await(tag: String, ms: Long = 8000): Any? {
-        val end = System.currentTimeMillis() + ms
+        val end = minOf(System.currentTimeMillis() + ms, deadline)
+        if (end <= System.currentTimeMillis()) throw java.io.IOException("Bluetooth timeout ($tag, out of time)")
         while (true) {
             val e = events.poll(maxOf(1, end - System.currentTimeMillis()), TimeUnit.MILLISECONDS) ?: throw java.io.IOException("Bluetooth timeout ($tag)")
             if (e.first == "down") throw java.io.IOException("Bluetooth disconnected")
@@ -76,10 +79,11 @@ class AndroidGatt private constructor(override val mac: String) : GattPort {
             return synchronized(seen) { seen.entries.sortedByDescending { it.value }.map { it.key } }
         }
 
-        fun connect(ctx: Context, mac: String): AndroidGatt {
+        /** Connects and discovers the mesh service. Every wait (and later write/read) is capped by [deadline] (epoch ms). */
+        fun connect(ctx: Context, mac: String, deadline: Long = Long.MAX_VALUE): AndroidGatt {
             val a = (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: throw java.io.IOException("no Bluetooth adapter")
             if (!a.isEnabled) throw java.io.IOException("Bluetooth is off")
-            val g = AndroidGatt(mac.uppercase())
+            val g = AndroidGatt(mac.uppercase()).also { it.deadline = deadline }
             g.gatt = a.getRemoteDevice(mac.uppercase()).connectGatt(ctx, false, g.cb, BluetoothDevice.TRANSPORT_LE)
             try {
                 g.await("up", 12000)

@@ -84,15 +84,45 @@ class Store(ctx: Context) {
     }
 
     /** Schedules: times, days, action and target ids (no keys). Plain JSON next to the vault, written atomically. */
-    fun loadSchedules(): List<Schedule> = try { if (schedFile.baseFile.exists()) Schedules.fromJson(String(schedFile.readFully())) else emptyList() } catch (e: Exception) {
-        android.util.Log.w("Lanternly", "schedules load: ${e.javaClass.simpleName}"); emptyList()
-    }
-    @Synchronized fun saveSchedules(l: List<Schedule>) {
+    fun loadSchedules(): List<Schedule> = loadSchedulesChecked().schedules
+
+    /**
+     * Never throws. Invalid entries are skipped (counted); an unreadable file is renamed to schedules.json.corrupt-<time>
+     * so the next save cannot overwrite it.
+     */
+    fun loadSchedulesChecked(): Schedules.Loaded = try {
+        synchronized(LOCK) {
+            Schedules.loadOrQuarantine(schedFile.baseFile, SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())) { String(schedFile.readFully()) }
+        }.also { l ->
+            l.quarantined?.let { prefs.edit().putString("schedQuarantined", it).commit() }
+            if (l.skipped > 0) android.util.Log.w("Lanternly", "schedules: ${l.skipped} invalid entries skipped")
+        }
+    } catch (e: Exception) { android.util.Log.w("Lanternly", "schedules load: ${e.javaClass.simpleName}"); Schedules.Loaded(emptyList(), 0, null) }
+
+    /** Name of the last quarantined schedules file, shown once on the Schedules page. */
+    var schedulesQuarantined: String? get() = prefs.getString("schedQuarantined", null); set(v) { prefs.edit().putString("schedQuarantined", v).apply() }
+
+    fun saveSchedules(l: List<Schedule>) = synchronized(LOCK) {
         val out = schedFile.startWrite()
         try { out.write(Schedules.toJson(l).toByteArray()); schedFile.finishWrite(out) } catch (e: Exception) { schedFile.failWrite(out); throw e }
     }
-    /** Result of the last schedule run, shown on the Schedules page. */
-    var lastRun: String? get() = prefs.getString("lastRun", null); set(v) = prefs.edit().putString("lastRun", v).apply()
+    /** Result of the last schedule run, shown on the Schedules page. Written with commit(): callers are background threads that may be killed right after. */
+    var lastRun: String? get() = prefs.getString("lastRun", null); set(v) { prefs.edit().putString("lastRun", v).commit() }
+
+    /** Due time (epoch ms) of the last run that started, per schedule: a clock set back must not replay it. */
+    fun lastFired(id: Long) = prefs.getLong("fired.$id", 0)
+    fun setLastFired(id: Long, due: Long) { prefs.edit().putLong("fired.$id", due).commit() }
+
+    /** Dense alarm slot per schedule id (request code = slot * 2, retry = slot * 2 + 1). Stable until [releaseSlot]. */
+    fun alarmSlot(id: Long): Int = synchronized(LOCK) {
+        val k = "slot.$id"
+        if (prefs.contains(k)) return prefs.getInt(k, 0)
+        val used = prefs.all.filterKeys { it.startsWith("slot.") }.values.mapNotNull { it as? Int }
+        Schedules.lowestFreeSlot(used).also { prefs.edit().putInt(k, it).commit() }
+    }
+    fun releaseSlot(id: Long) = synchronized(LOCK) { prefs.edit().remove("slot.$id").remove("fired.$id").commit() }
+
+    companion object { private val LOCK = Any() }
 
     fun forget() { schedFile.delete(); atomic.delete(); prefs.edit().clear().apply(); quarantined = null }
 }

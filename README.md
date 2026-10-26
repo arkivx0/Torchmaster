@@ -10,7 +10,10 @@ Not affiliated with GE Lighting, Savant or Cync.
 - **Quick scenes.** Bright, Relax, Focus, Night, Red, Off. Multi-bulb actions report results, e.g. "3/5 bulbs updated".
 - **Schedules.** On, off or a scene for a bulb, a room or all bulbs at set times and days. They run on the device
   itself over Bluetooth (Android: system alarms, also after a reboot; Windows: while Lanternly runs in the tray),
-  so the phone or PC must be near the bulbs. Missed runs are skipped, not run late.
+  so the phone or PC must be near the bulbs. A run more than 10 minutes late is skipped, not run late; a run that
+  reaches no bulb is retried within those 10 minutes. On Android a run shows a small "Running a schedule"
+  notification while it works. Note for store builds: Android's USE_EXACT_ALARM is restricted on Google Play to
+  alarm-clock and calendar apps; a Play build would use SCHEDULE_EXACT_ALARM and its existing inexact fallback.
 - **Dark Tokyo Night theme.** Windows has a tray icon with All on / All off / scenes.
 - **No telemetry.** Keys are never logged. They are stored with Android Keystore (AES-GCM) or Windows DPAPI.
 

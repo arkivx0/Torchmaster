@@ -10,6 +10,10 @@ public sealed class Settings
     public int HomeIndex { get; set; }
     /// <summary>False after bulbs were added locally until a key file is exported (backup nag).</summary>
     public bool BackedUp { get; set; } = true;
+    /// <summary>Due time (Unix ms) of the last schedule run that started, per schedule id: a clock set back must not replay it.</summary>
+    public Dictionary<long, long> LastFired { get; set; } = [];
+    /// <summary>Result of the last schedule run, kept on the Schedules page.</summary>
+    public string? LastRun { get; set; }
 }
 
 /// <summary>
@@ -69,9 +73,20 @@ public static class Store
     /// <summary>Schedules (times, days, action, target ids; no keys), stored next to settings.json.</summary>
     public static List<Schedule> LoadSchedules()
     {
-        try { return File.Exists(SchedulesPath) ? Schedules.FromJson(File.ReadAllText(SchedulesPath)) : []; }
+        try
+        {
+            var (l, bad, q) = Schedules.LoadOrQuarantine(SchedulesPath, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            if (bad > 0) Program.Log(null, $"schedules: {bad} invalid entries skipped");
+            if (q != null) { Program.Log(null, "schedules unreadable, moved aside"); SchedulesQuarantined = q; }
+            SchedulesSkipped = bad;
+            return l;
+        }
         catch (Exception ex) { Program.Log(ex, "schedules load"); return []; }
     }
+    /// <summary>File name of an unreadable schedules.json that was moved aside at load, if any.</summary>
+    public static string? SchedulesQuarantined { get; set; }
+    public static int SchedulesSkipped { get; private set; }
+
     public static void SaveSchedules(List<Schedule> l)
     {
         Directory.CreateDirectory(Dir);

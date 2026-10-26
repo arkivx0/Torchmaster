@@ -64,7 +64,7 @@ public sealed class MainWindow : Window
         _tray.AllPower += on => RunBatch(async () => CurrentHome is { } h ? await _router.SendManyAsync(h, h.Bulbs, new Cmd.Power(on)) : new BatchResult(0, 0, null));
         _tray.Scene += s => RunBatch(async () => CurrentHome is { } h ? await Scenes.ApplyAsync(_router, h, s) : new BatchResult(0, 0, null));
         Closing += (_, e) => { if (!_quitting) { e.Cancel = true; Hide(); } };
-        Closed += async (_, _) => { _clock.Stop(); Microsoft.Win32.SystemEvents.TimeChanged -= OnTimeChanged; _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
+        Closed += async (_, _) => { _clock.Stop(); Microsoft.Win32.SystemEvents.TimeChanged -= OnTimeChanged; Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
         Loaded += async (_, _) =>
         {
             if (Store.Quarantined is { } q)
@@ -75,47 +75,107 @@ public sealed class MainWindow : Window
         _clock.Tick += (_, _) => CheckSchedules();
         _clock.Start();
         Microsoft.Win32.SystemEvents.TimeChanged += OnTimeChanged;
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Render();
     }
 
     // ---------------- schedules ----------------
     void OnTimeChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => { TimeZoneInfo.ClearCachedData(); Replan(); });
 
-    /// <summary>Recomputes every next run from now, so nothing that was due earlier fires late.</summary>
+    /// <summary>After sleep the Bluetooth link is usually dead even if it still looks logged in: reconnect, then check schedules.</summary>
+    void OnPowerModeChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != Microsoft.Win32.PowerModes.Resume || _demo) return;
+        Dispatcher.BeginInvoke(async () =>
+        {
+            await _scheduleGate.WaitAsync();
+            try { await Reconnect(); } catch (Exception ex) { Program.Log(ex, "resume reconnect"); } finally { _scheduleGate.Release(); }
+            CheckSchedules();
+        });
+    }
+
+    long LastFired(long id) => _set.LastFired.TryGetValue(id, out var v) ? v : 0;
+
+    /// <summary>Recomputes every next run from now (and after the last run that fired), so nothing fires late or twice.</summary>
     void Replan()
     {
         _due.Clear();
         var now = DateTimeOffset.Now;
-        foreach (var s in _schedules.Where(s => s.Enabled)) if (Schedules.NextFire(s, now, TimeZoneInfo.Local) is { } t) _due[s.Id] = t;
+        foreach (var s in _schedules.Where(s => s.Enabled)) if (Schedules.NextFireAfter(s, now, TimeZoneInfo.Local, LastFired(s.Id)) is { } t) _due[s.Id] = t;
     }
 
-    /// <summary>Runs schedules that are due. A run more than a few minutes late (PC asleep, clock changed) is skipped.</summary>
+    /// <summary>Runs schedules that are due. A run more than <see cref="Schedules.Grace"/> late (PC asleep, clock changed) is skipped.</summary>
     void CheckSchedules()
     {
         var now = DateTimeOffset.Now;
         foreach (var s in _schedules.Where(s => s.Enabled).ToList())
         {
             if (!_due.TryGetValue(s.Id, out var due) || due > now) continue;
-            if (Schedules.OnTime(due, now)) RunSchedule(s);
-            else Program.Log(null, "schedule skipped (missed)");
-            if (Schedules.NextFire(s, now, TimeZoneInfo.Local) is { } t) _due[s.Id] = t; else _due.Remove(s.Id);
+            if (Schedules.IsReplay(due, LastFired(s.Id))) Program.Log(null, "schedule replay skipped (clock set back)");
+            else if (Schedules.OnTime(due, now))
+            {
+                _set.LastFired[s.Id] = due.ToUnixTimeMilliseconds(); Save();
+                RunSchedule(s, due);
+            }
+            else { Program.Log(null, "schedule skipped (missed)"); Note(Label(s) + $": skipped (more than {Schedules.Grace.TotalMinutes:0} minutes late)"); }
+            if (Schedules.NextFireAfter(s, now, TimeZoneInfo.Local, LastFired(s.Id)) is { } t) _due[s.Id] = t; else _due.Remove(s.Id);
         }
     }
 
-    async void RunSchedule(Schedule s)
+    static string Label(Schedule s) => $"Schedule {s.Hour:00}:{s.Minute:00} ({Schedules.ActionText(s.Action)})";
+
+    /// <summary>Status line plus the persistent "Last run" line on the Schedules page.</summary>
+    void Note(string msg)
     {
-        var label = $"Schedule {s.Hour:00}:{s.Minute:00} ({Schedules.ActionText(s.Action)})";
+        SetStatus(msg);
+        _set.LastRun = $"{DateTime.Now:g} · {msg}";
+        Save();
+        if (_schedulesOpen) Render();
+    }
+
+    async Task<BatchResult> TryRun(Router r, Home h, Schedule s)
+    {
+        try { return await Schedules.RunAsync(r, h, s); }
+        catch (Exception ex) { Program.Log(ex, "schedule"); return new BatchResult(0, Schedules.Targets(h, s).Count, ex.Message); }
+    }
+
+    /// <summary>A schedule for a home that is not selected: a temporary connection to that home's mesh, closed afterwards.</summary>
+    async Task<BatchResult> RunOtherHome(Home h, Schedule s)
+    {
+        if (!_set.Ble) return new BatchResult(0, Schedules.Targets(h, s).Count, "Bluetooth is off in Lanternly settings");
+        BleSession? t = null;
+        try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); return await TryRun(new Router([t]), h, s); }
+        catch (Exception ex) { Program.Log(ex, "schedule other home"); return new BatchResult(0, Schedules.Targets(h, s).Count, ex.Message); }
+        finally { if (t != null) await t.DisposeAsync(); }
+    }
+
+    async void RunSchedule(Schedule s, DateTimeOffset due)
+    {
+        var label = Label(s);
         var h = _vault.Homes.FirstOrDefault(x => x.Id == s.HomeId);
-        if (h == null) { SetStatus(label + ": its home was removed"); return; }
-        if (h != CurrentHome) { SetStatus(label + ": skipped, it is for another home"); return; }
+        if (h == null) { Note(label + ": its home was removed"); return; }
         await _scheduleGate.WaitAsync();
         try
         {
-            if (!_demo && _ble?.LoggedIn != true) await Reconnect();
-            var r = await Schedules.RunAsync(_router, h, s);
-            SetStatus($"{label}: {r}");
+            var other = !_demo && h != CurrentHome;
+            SetStatus(label + ": running…");
+            BatchResult r;
+            if (other) r = await RunOtherHome(h, s);
+            else
+            {
+                if (!_demo && _ble?.LoggedIn != true) await Reconnect();
+                r = await TryRun(_router, h, s);
+            }
+            var retried = false;
+            if (!_demo && r.Ok == 0 && Schedules.OnTime(due, DateTimeOffset.Now)) // stale link (e.g. after sleep): reconnect and retry once
+            {
+                retried = true;
+                if (other) r = await RunOtherHome(h, s);
+                else { await Reconnect(); r = await TryRun(_router, h, s); }
+            }
+            Note($"{label}: {r}" + (other ? $" · {h.Name} (not the selected home, temporary connection)" : "") + (retried ? " · after one retry" : ""));
         }
-        catch (Exception ex) { Program.Log(ex, "schedule"); SetStatus($"{label}: {ex.Message}"); }
+        catch (Exception ex) { Program.Log(ex, "schedule"); Note($"{label}: {ex.Message}"); }
         finally { _scheduleGate.Release(); UpdateRows(); }
     }
 
@@ -130,7 +190,13 @@ public sealed class MainWindow : Window
         var p = new StackPanel();
         var c = new StackPanel();
         c.Children.Add(new TextBlock { Text = "Schedules", FontWeight = FontWeights.SemiBold, FontSize = 14, Margin = new Thickness(0, 6, 0, 4) });
-        c.Children.Add(new TextBlock { Text = "Schedules run on this PC only while Lanternly is running (closing the window keeps it in the tray), the PC is awake, Bluetooth is on and a bulb is in range. A run missed by more than 5 minutes is skipped, not run late.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 11, Margin = new Thickness(0, 2, 0, 8) });
+        c.Children.Add(new TextBlock { Text = $"Schedules run on this PC only while Lanternly is running (closing the window keeps it in the tray), the PC is awake, Bluetooth is on and a bulb is in range. A run missed by more than {Schedules.Grace.TotalMinutes:0} minutes is skipped, not run late. If no bulb answers, Lanternly reconnects and retries once. Schedules for a home that is not selected still run, over a temporary connection to that home.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 11, Margin = new Thickness(0, 2, 0, 8) });
+        if (!_demo && Store.SchedulesQuarantined is { } q)
+            c.Children.Add(new TextBlock { Text = $"⚠ The saved schedules could not be read, so they were moved aside ({q}) and the list starts empty.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Yellow"), Margin = new Thickness(0, 0, 0, 6) });
+        if (!_demo && Store.SchedulesSkipped > 0)
+            c.Children.Add(new TextBlock { Text = $"⚠ {Store.SchedulesSkipped} saved schedule(s) were invalid and are ignored.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Yellow"), Margin = new Thickness(0, 0, 0, 6) });
+        if (!_demo && _set.LastRun is { } lr)
+            c.Children.Add(new TextBlock { Text = "Last run: " + lr, TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 11, Margin = new Thickness(0, 0, 0, 6) });
         if (_schedules.Count == 0) c.Children.Add(new TextBlock { Text = "No schedules yet.", Foreground = Br("Dim"), Margin = new Thickness(0, 0, 0, 6) });
         foreach (var s in _schedules)
         {
@@ -138,13 +204,13 @@ public sealed class MainWindow : Window
             var line = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
             var del = new Button { Content = "Delete", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
             System.Windows.Automation.AutomationProperties.SetName(del, "Delete schedule " + Schedules.Describe(home, s));
-            del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); SaveSchedules(); Render(); };
+            del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); _set.LastFired.Remove(sc.Id); Save(); SaveSchedules(); Render(); };
             DockPanel.SetDock(del, Dock.Right); line.Children.Add(del);
             var on = new CheckBox { Style = (Style)FindResource("Switch"), IsChecked = s.Enabled, VerticalAlignment = VerticalAlignment.Center, ToolTip = "Enabled" };
             System.Windows.Automation.AutomationProperties.SetName(on, "Enabled: " + Schedules.Describe(home, s));
             on.Click += (_, _) => { sc.Enabled = on.IsChecked == true; SaveSchedules(); };
             DockPanel.SetDock(on, Dock.Right); line.Children.Add(on);
-            line.Children.Add(new TextBlock { Text = Schedules.Describe(home, s) + (_vault.Homes.Count > 1 && home != null ? $" ({home.Name})" : ""), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            line.Children.Add(new TextBlock { Text = Schedules.Describe(home, s) + (_vault.Homes.Count > 1 && home != null ? (home == CurrentHome ? $" ({home.Name})" : $" ({home.Name}, not selected: runs over a temporary connection)") : ""), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
             c.Children.Add(line);
         }
         var row = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -492,7 +558,7 @@ public sealed class MainWindow : Window
         about.Children.Add(H("About"));
         about.Children.Add(Note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
-        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
+        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);
         var done = new Button { Content = "Done", Style = (Style)FindResource("AccentButton"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0) };
         done.Click += (_, _) => { _settingsOpen = false; Render(); };

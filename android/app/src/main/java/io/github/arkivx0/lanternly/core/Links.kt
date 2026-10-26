@@ -77,7 +77,7 @@ interface GattPort {
 }
 
 /** Logged-in Telink mesh session through one bulb; reaches every node of that mesh. */
-class BleSession(private val g: GattPort, private val home: Home) : Link {
+class BleSession(private val g: GattPort, val home: Home) : Link {
     override val kind = Via.BLE
     override var onState: ((Home?, BulbState) -> Unit)? = null
     @Volatile private var sk: ByteArray? = null
