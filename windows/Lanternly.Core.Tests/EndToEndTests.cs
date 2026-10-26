@@ -120,6 +120,25 @@ public class EndToEndTests
         public ValueTask DisposeAsync() => inner.DisposeAsync();
     }
 
+    sealed class HungGatt(IGatt inner) : IGatt
+    {
+        public string Mac => inner.Mac;
+        public Task WriteAsync(Guid ch, byte[] data, bool withResponse) => ch == Ble.CommandChar ? new TaskCompletionSource().Task : inner.WriteAsync(ch, data, withResponse);
+        public Task<byte[]> ReadAsync(Guid ch) => inner.ReadAsync(ch);
+        public Task SubscribeAsync(Guid ch, Action<byte[]> f) => inner.SubscribeAsync(ch, f);
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
+    [Fact] // a write that never completes must not block later commands forever
+    public async Task HungWriteTimesOutAndReleasesTheLock()
+    {
+        var home = MakeHome();
+        await using var ble = new BleSession(new HungGatt(new FakeNode(home.Bulbs[0].Mac, home.MeshName, home.MeshPassword)), home) { WriteTimeout = TimeSpan.FromMilliseconds(200) };
+        await ble.LoginAsync();
+        await Assert.ThrowsAsync<TimeoutException>(() => ble.SendAsync(home, home.Bulbs[0], new Cmd.Power(true)));
+        await Assert.ThrowsAsync<TimeoutException>(() => ble.SendAsync(home, home.Bulbs[0], new Cmd.Power(false)).WaitAsync(TimeSpan.FromSeconds(3)));
+    }
+
     [Fact] // a quick second tap must not let the stop overtake a slow start write
     public async Task ConcurrentSendsAreSerializedInOrder()
     {

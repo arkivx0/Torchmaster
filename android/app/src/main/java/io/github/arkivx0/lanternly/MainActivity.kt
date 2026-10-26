@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -27,6 +29,8 @@ class MainActivity : Activity() {
         const val FG = 0xFFC0CAF5.toInt(); const val DIM = 0xFF7982A9.toInt(); const val ACCENT = 0xFF7AA2F7.toInt()
         const val GREEN = 0xFF9ECE6A.toInt(); const val YELLOW = 0xFFE0AF68.toInt()
         const val REQ_IMPORT = 1; const val REQ_EXPORT = 2; const val REQ_PERMS = 3
+        /** Token for blink timers, so onStop removes only those and never other queued UI work. */
+        private val BLINK_TIMERS = Any()
         val SWATCHES = intArrayOf(0xFFF7768E.toInt(), 0xFFFF9E64.toInt(), 0xFFE0AF68.toInt(), 0xFF9ECE6A.toInt(), 0xFF73DACA.toInt(), 0xFF7AA2F7.toInt(), 0xFFBB9AF7.toInt())
     }
 
@@ -45,6 +49,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var body: LinearLayout
     private var settingsOpen = false
+    private var schedulesOpen = false
+    private var schedules: List<Schedule> = emptyList()
     private val refreshers = ArrayList<() -> Unit>()
     private var demo = false
 
@@ -56,6 +62,8 @@ class MainActivity : Activity() {
         store = Store(this)
         demo = intent?.getBooleanExtra("demo", false) == true
         vault = if (demo) demoVault() else store.load()
+        schedules = if (demo) emptyList() else store.loadSchedules()
+        if (!demo) Thread { Alarms.planAll(applicationContext, schedules) }.start()
         Diag.sink = { where, e -> android.util.Log.w("Lanternly", where + (e?.let { ": " + it.javaClass.simpleName } ?: "")) }
         window.statusBarColor = BG; window.navigationBarColor = BG
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG); fitsSystemWindows = true }
@@ -64,7 +72,8 @@ class MainActivity : Activity() {
         titles.addView(text("Lanternly", 20f, FG, bold = true))
         status = text("", 12f, DIM); titles.addView(status)
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(button("⚙") { settingsOpen = !settingsOpen; render() })
+        top.addView(button("⏰") { schedulesOpen = !schedulesOpen; settingsOpen = false; render() }.apply { contentDescription = "Schedules"; (layoutParams as? ViewGroup.MarginLayoutParams)?.rightMargin = dp(6) })
+        top.addView(button("⚙") { settingsOpen = !settingsOpen; schedulesOpen = false; render() }.apply { contentDescription = "Settings" })
         top.addView(button("✕") { finishAndRemoveTask() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
         root.addView(top)
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), dp(16)) }
@@ -81,18 +90,22 @@ class MainActivity : Activity() {
 
     override fun onStop() { super.onStop(); stopAllBlinks() }
 
+    override fun onResume() { super.onResume(); if (schedulesOpen) render() } // exact-alarm permission may have changed
+
     override fun onDestroy() {
         super.onDestroy()
         stopAllBlinks()
         closing = true
         cmdIo.shutdown()
-        try { cmdIo.awaitTermination(2, TimeUnit.SECONDS) } catch (_: InterruptedException) {} // let queued stops go out
-        teardown(); io.shutdown()
+        // Let queued stops go out, then disconnect, off the main thread so a hung write never freezes the UI.
+        val s = ble; ble = null
+        Thread { try { cmdIo.awaitTermination(2, TimeUnit.SECONDS) } catch (_: InterruptedException) {}; s?.close() }.start()
+        io.shutdown()
     }
 
-    /** Cancels blink timers and queues a stop for every bulb still blinking. */
+    /** Cancels blink timers (only those) and queues a stop for every bulb still blinking. */
     private fun stopAllBlinks() {
-        ui.removeCallbacksAndMessages(null)
+        ui.removeCallbacksAndMessages(BLINK_TIMERS)
         for ((b, h) in blinks.drain()) send(h, listOf(b), Cmd.Identify(false), quiet = true)
     }
 
@@ -104,7 +117,11 @@ class MainActivity : Activity() {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) { connect() }
 
-    private fun teardown() { ble?.close(); ble = null }
+    /** Waits (max 2 s) for queued bulb commands such as blink stops, then disconnects. Call off the main thread. */
+    private fun teardown() {
+        try { cmdIo.submit {}.get(2, TimeUnit.SECONDS) } catch (e: Exception) { Diag.log("teardown wait", e) }
+        ble?.close(); ble = null
+    }
 
     /** Saves the vault; false (with a visible reason) when saving is blocked after a vault read failure. */
     private fun save(): Boolean = try { if (!demo) store.save(vault); true } catch (e: Exception) {
@@ -175,12 +192,17 @@ class MainActivity : Activity() {
         }
         val id = blinks.start(b, h)
         lateinit var timer: Runnable
-        timer = Runnable { if (blinks.expire(b, id)) { send(h, listOf(b), Cmd.Identify(false), quiet = true) ; setStatus("Stopped blinking ${b.name}"); refresh() } }
+        timer = Runnable {
+            if (blinks.expire(b, id)) {
+                send(h, listOf(b), Cmd.Identify(false), done = { r -> if (r.allOk) setStatus("Stopped blinking ${b.name}") else setStatus("${b.name}: stop not confirmed (${r.firstError ?: "not reachable"})") })
+                refresh()
+            }
+        }
         send(h, listOf(b), Cmd.Identify(true), done = { r ->
             if (r.allOk) { if (blinks.isActive(b)) setStatus("Blinking ${b.name}… tap ◎ again to stop") }
             else { if (blinks.cancel(b, id)) ui.removeCallbacks(timer); setStatus(r.firstError ?: "${b.name}: not reachable") }
         })
-        ui.postDelayed(timer, 5000)
+        ui.postAtTime(timer, BLINK_TIMERS, SystemClock.uptimeMillis() + 5000)
         refresh()
     }
 
@@ -190,7 +212,7 @@ class MainActivity : Activity() {
     private fun render() {
         body.removeAllViews(); refreshers.clear()
         val h = home
-        when { settingsOpen -> settings(); h == null -> empty(); else -> homeView(h) }
+        when { settingsOpen -> settings(); schedulesOpen -> schedulesView(); h == null -> empty(); else -> homeView(h) }
     }
 
     private fun empty() {
@@ -202,7 +224,7 @@ class MainActivity : Activity() {
     private fun homeView(h: Home) {
         if (vault.homes.size > 1) {
             val row = LinearLayout(this)
-            vault.homes.forEachIndexed { i, x -> row.addView(chip(x.name, i == store.homeIndex) { store.homeIndex = i; render(); connect() }) }
+            vault.homes.forEachIndexed { i, x -> row.addView(chip(x.name, i == store.homeIndex) { stopAllBlinks(); store.homeIndex = i; render(); connect() }) }
             body.addView(HorizontalScrollView(this).apply { addView(row) })
         }
         val sc = LinearLayout(this).apply { setPadding(0, dp(4), 0, dp(8)) }
@@ -296,10 +318,10 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.2 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
-            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> io.execute { teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
+            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
         })
         r2.addView(button("Done", accent = true) { settingsOpen = false; render() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
         c4.addView(r2); body.addView(c4, lp())
@@ -344,6 +366,76 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- schedules ----------
+    private fun saveSchedules(l: List<Schedule>, changed: Schedule? = null, removed: Schedule? = null) {
+        schedules = l
+        if (demo) return
+        io.execute {
+            try { store.saveSchedules(l) } catch (e: Exception) { Diag.log("schedules save", e); post { setStatus("Schedules not saved: ${e.message}") } }
+            removed?.let { Alarms.cancel(applicationContext, it.id) }
+            changed?.let { Alarms.plan(applicationContext, it) }
+        }
+    }
+
+    private fun schedulesView() {
+        val c = card()
+        c.addView(text("Schedules", 16f, FG, bold = true))
+        c.addView(note("Schedules run on this phone, with no internet. At the set time the phone must be near the bulbs (Bluetooth range of at least one) with Bluetooth on. A run more than 10 minutes late, e.g. phone off, is skipped."))
+        if (!demo && !Alarms.exactAllowed(this)) {
+            c.addView(note("⚠ Exact alarms are not allowed, so runs may be a few minutes late or skipped. Allow \"Alarms & reminders\" for Lanternly to fix this."))
+            if (Build.VERSION.SDK_INT >= 31) c.addView(button("Allow exact alarms") {
+                try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName"))) } catch (e: Exception) { Diag.log("exact alarm settings", e) }
+            })
+        }
+        store.lastRun?.takeIf { !demo }?.let { c.addView(note("Last run: $it")) }
+        if (schedules.isEmpty()) c.addView(note("No schedules yet."))
+        for (s in schedules) {
+            val h = vault.homes.firstOrNull { it.id == s.homeId }
+            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
+            val desc = Schedules.describe(h, s) + (if (vault.homes.size > 1 && h != null) " (${h.name})" else "")
+            line.addView(text(desc, 14f, FG), LinearLayout.LayoutParams(0, -2, 1f))
+            val sw = switch().apply { isChecked = s.enabled; contentDescription = "Enabled: $desc" }
+            sw.setOnClickListener { val n = s.copy(enabled = sw.isChecked); saveSchedules(schedules.map { if (it.id == s.id) n else it }, changed = n) }
+            line.addView(sw)
+            line.addView(button("✕") {
+                AlertDialog.Builder(this).setMessage("Delete this schedule?\n$desc").setPositiveButton("Delete") { _, _ -> saveSchedules(schedules.filter { it.id != s.id }, removed = s); render() }.setNegativeButton("Cancel", null).show()
+            }.apply { contentDescription = "Delete schedule $desc"; (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
+            c.addView(line)
+        }
+        val r = LinearLayout(this).apply { setPadding(0, dp(6), 0, 0) }
+        val h = home
+        r.addView(button("Add schedule") { if (h != null) addSchedule(h) }.apply { isEnabled = h != null })
+        r.addView(button("Done", accent = true) { schedulesOpen = false; render() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
+        c.addView(r)
+        if (h == null) c.addView(note("Add or import bulbs first."))
+        body.addView(c, lp())
+    }
+
+    private fun addSchedule(h: Home) {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        val tp = TimePicker(this).apply { setIs24HourView(android.text.format.DateFormat.is24HourFormat(this@MainActivity)); hour = 7; minute = 0 }
+        box.addView(tp)
+        val days = Schedules.DAY_NAMES.map { CheckBox(this).apply { text = it; isChecked = true } }
+        val dr = LinearLayout(this); days.forEach { dr.addView(it) }
+        box.addView(HorizontalScrollView(this).apply { addView(dr) })
+        box.addView(TextView(this).apply { text = "Action" })
+        val act = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, Schedules.ACTIONS.map { Schedules.actionText(it) }); contentDescription = "Action" }
+        box.addView(act)
+        box.addView(TextView(this).apply { text = "Bulbs" })
+        val targets = listOf("all" to "All bulbs") + h.rooms.map { "room:${it.id}" to "Room: ${it.name}" } + h.bulbs.map { "bulb:${it.meshId}" to it.name }
+        val tgt = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, targets.map { it.second }); contentDescription = "Bulbs" }
+        box.addView(tgt)
+        box.addView(TextView(this).apply { text = "The phone must be near the bulbs with Bluetooth on at that time. Scenes set color only on bulbs that support it."; textSize = 12f })
+        val d = AlertDialog.Builder(this).setTitle("Add schedule").setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Add", null).setNegativeButton("Cancel", null).show()
+        d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            var mask = 0; days.forEachIndexed { i, cb -> if (cb.isChecked) mask = mask or (1 shl i) }
+            if (mask == 0) { Toast.makeText(this, "Choose at least one day", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            val s = Schedule(System.currentTimeMillis(), true, tp.hour, tp.minute, mask, Schedules.ACTIONS[act.selectedItemPosition], h.id, targets[tgt.selectedItemPosition].first)
+            d.dismiss(); saveSchedules(schedules + s, changed = s); render()
+        }
+    }
+
     /** Export: warn, offer a passphrase (recommended), then pick a file. */
     private fun exportKeys() {
         if (vault.homes.isEmpty()) return
@@ -375,6 +467,7 @@ class MainActivity : Activity() {
         try {
             if (requestCode == REQ_IMPORT) {
                 val text = contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+                stopAllBlinks() // send pending stops over the old connection before it is replaced
                 fun doImport(pass: String?) = io.execute {
                     try {
                         val v = KeyFile.import(text, pass)

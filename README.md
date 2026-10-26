@@ -7,7 +7,10 @@ Not affiliated with GE Lighting, Savant or Cync.
   sign-in or internet code; the Android app does not even request the INTERNET permission. Tests fail the build if a
   GE cloud host name or a networking API ever appears in the source (`OfflineTests`, `OfflineTest.kt`).
 - **Rooms and bulbs.** On/off, brightness, color temperature and RGB. Rooms get on/off and brightness.
-- **Quick scenes.** Bright, Relax, Focus, Night, Off. Multi-bulb actions report results, e.g. "3/5 bulbs updated".
+- **Quick scenes.** Bright, Relax, Focus, Night, Red, Off. Multi-bulb actions report results, e.g. "3/5 bulbs updated".
+- **Schedules.** On, off or a scene for a bulb, a room or all bulbs at set times and days. They run on the device
+  itself over Bluetooth (Android: system alarms, also after a reboot; Windows: while Lanternly runs in the tray),
+  so the phone or PC must be near the bulbs. Missed runs are skipped, not run late.
 - **Dark Tokyo Night theme.** Windows has a tray icon with All on / All off / scenes.
 - **No telemetry.** Keys are never logged. They are stored with Android Keystore (AES-GCM) or Windows DPAPI.
 

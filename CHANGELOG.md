@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 (unreleased)
+- Schedules: turn bulbs, a room or all bulbs on or off, or apply a scene (e.g. Red at full brightness), at a set
+  time on chosen days. Runs on the device only, over Bluetooth, with no network.
+  - Android: exact alarms when allowed (falls back to inexact), re-planned after reboot and clock or time zone
+    changes. The phone must be near the bulbs with Bluetooth on. A run more than 10 minutes late is skipped.
+  - Windows: runs while Lanternly is open or in the tray and the PC is awake. A run more than 5 minutes late is skipped.
+- Fixes from review: leaving the app no longer drops other pending UI updates; closing no longer blocks the UI
+  while stops are sent; the automatic blink stop reports a failed stop; Forget, Import and switching homes stop
+  any blink first; Windows Bluetooth writes time out instead of blocking later commands.
+- New version number (0.1.3, Android versionCode 4) so this build can be told apart from 0.1.2.
+- Tests for schedule times, days of the week and daylight-saving changes.
+
 ## 0.1.2 (unreleased)
 - "Find this bulb": a per-bulb button makes the bulb blink (BLE identify command); it stops after a few seconds
   or on a second tap.

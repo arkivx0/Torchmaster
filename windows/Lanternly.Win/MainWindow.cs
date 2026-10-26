@@ -19,6 +19,12 @@ public sealed class MainWindow : Window
     /// <summary>Active "find" blinks, at window level so they survive row rebuilds and are stopped on quit.</summary>
     readonly Blinks<Bulb> _blinks = new();
     readonly Dictionary<Bulb, Home> _blinkHome = [];
+    /// <summary>Schedules run by an in-app timer while Lanternly runs (window or tray).</summary>
+    List<Schedule> _schedules;
+    readonly Dictionary<long, DateTimeOffset> _due = [];
+    readonly System.Windows.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(15) };
+    bool _schedulesOpen;
+    readonly SemaphoreSlim _scheduleGate = new(1, 1); // one schedule run at a time
 
     Home? CurrentHome => _vault.Homes.Count == 0 ? null : _vault.Homes[Math.Clamp(_set.HomeIndex, 0, _vault.Homes.Count - 1)];
 
@@ -27,6 +33,7 @@ public sealed class MainWindow : Window
         _demo = demo;
         _set = demo ? new Settings() : Store.LoadSettings();
         _vault = demo ? DemoLink.SampleVault() : Store.LoadVault();
+        _schedules = demo ? [] : Store.LoadSchedules();
         Title = "Lanternly"; Width = 440; Height = 640; MinWidth = 360; MinHeight = 400;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         try { Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/lanternly.ico")); } catch (Exception ex) { Program.Log(ex, "icon"); }
@@ -34,14 +41,18 @@ public sealed class MainWindow : Window
 
         var top = new DockPanel { Margin = new Thickness(14, 12, 14, 6), LastChildFill = true };
         var gear = new Button { Content = "⚙", ToolTip = "Settings", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0) };
-        gear.Click += (_, _) => { _settingsOpen = !_settingsOpen; Render(); };
+        gear.Click += (_, _) => { _settingsOpen = !_settingsOpen; _schedulesOpen = false; Render(); };
         DockPanel.SetDock(gear, Dock.Right); top.Children.Add(gear);
+        var clock = new Button { Content = "⏰", ToolTip = "Schedules", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0) };
+        System.Windows.Automation.AutomationProperties.SetName(clock, "Schedules");
+        clock.Click += (_, _) => { _schedulesOpen = !_schedulesOpen; _settingsOpen = false; Render(); };
+        DockPanel.SetDock(clock, Dock.Right); top.Children.Add(clock);
         DockPanel.SetDock(_homePick, Dock.Right); top.Children.Add(_homePick);
         var title = new StackPanel();
         title.Children.Add(new TextBlock { Text = "Lanternly", FontSize = 18, FontWeight = FontWeights.SemiBold });
         title.Children.Add(_status);
         top.Children.Add(title);
-        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { _set.HomeIndex = _homePick.SelectedIndex; Save(); await Reconnect(); } };
+        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { await StopAllBlinks(); _set.HomeIndex = _homePick.SelectedIndex; Save(); await Reconnect(); } };
 
         var root = new DockPanel();
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
@@ -53,14 +64,103 @@ public sealed class MainWindow : Window
         _tray.AllPower += on => RunBatch(async () => CurrentHome is { } h ? await _router.SendManyAsync(h, h.Bulbs, new Cmd.Power(on)) : new BatchResult(0, 0, null));
         _tray.Scene += s => RunBatch(async () => CurrentHome is { } h ? await Scenes.ApplyAsync(_router, h, s) : new BatchResult(0, 0, null));
         Closing += (_, e) => { if (!_quitting) { e.Cancel = true; Hide(); } };
-        Closed += async (_, _) => { _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
+        Closed += async (_, _) => { _clock.Stop(); Microsoft.Win32.SystemEvents.TimeChanged -= OnTimeChanged; _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
         Loaded += async (_, _) =>
         {
             if (Store.Quarantined is { } q)
                 MessageBox.Show(this, $"Lanternly could not read its stored keys, so it moved them aside to:\n{q}\n\nNothing will be saved until you import a key file (⚙ → Import key file…) or choose Forget everything. Your bulbs are not affected.", "Lanternly: stored keys unreadable", MessageBoxButton.OK, MessageBoxImage.Error);
             await Reconnect();
         };
+        Replan();
+        _clock.Tick += (_, _) => CheckSchedules();
+        _clock.Start();
+        Microsoft.Win32.SystemEvents.TimeChanged += OnTimeChanged;
         Render();
+    }
+
+    // ---------------- schedules ----------------
+    void OnTimeChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => { TimeZoneInfo.ClearCachedData(); Replan(); });
+
+    /// <summary>Recomputes every next run from now, so nothing that was due earlier fires late.</summary>
+    void Replan()
+    {
+        _due.Clear();
+        var now = DateTimeOffset.Now;
+        foreach (var s in _schedules.Where(s => s.Enabled)) if (Schedules.NextFire(s, now, TimeZoneInfo.Local) is { } t) _due[s.Id] = t;
+    }
+
+    /// <summary>Runs schedules that are due. A run more than a few minutes late (PC asleep, clock changed) is skipped.</summary>
+    void CheckSchedules()
+    {
+        var now = DateTimeOffset.Now;
+        foreach (var s in _schedules.Where(s => s.Enabled).ToList())
+        {
+            if (!_due.TryGetValue(s.Id, out var due) || due > now) continue;
+            if (Schedules.OnTime(due, now)) RunSchedule(s);
+            else Program.Log(null, "schedule skipped (missed)");
+            if (Schedules.NextFire(s, now, TimeZoneInfo.Local) is { } t) _due[s.Id] = t; else _due.Remove(s.Id);
+        }
+    }
+
+    async void RunSchedule(Schedule s)
+    {
+        var label = $"Schedule {s.Hour:00}:{s.Minute:00} ({Schedules.ActionText(s.Action)})";
+        var h = _vault.Homes.FirstOrDefault(x => x.Id == s.HomeId);
+        if (h == null) { SetStatus(label + ": its home was removed"); return; }
+        if (h != CurrentHome) { SetStatus(label + ": skipped, it is for another home"); return; }
+        await _scheduleGate.WaitAsync();
+        try
+        {
+            if (!_demo && _ble?.LoggedIn != true) await Reconnect();
+            var r = await Schedules.RunAsync(_router, h, s);
+            SetStatus($"{label}: {r}");
+        }
+        catch (Exception ex) { Program.Log(ex, "schedule"); SetStatus($"{label}: {ex.Message}"); }
+        finally { _scheduleGate.Release(); UpdateRows(); }
+    }
+
+    void SaveSchedules()
+    {
+        if (!_demo) try { Store.SaveSchedules(_schedules); } catch (Exception ex) { Program.Log(ex, "schedules save"); SetStatus("Could not save schedules: " + ex.Message); }
+        Replan();
+    }
+
+    UIElement SchedulesPanel()
+    {
+        var p = new StackPanel();
+        var c = new StackPanel();
+        c.Children.Add(new TextBlock { Text = "Schedules", FontWeight = FontWeights.SemiBold, FontSize = 14, Margin = new Thickness(0, 6, 0, 4) });
+        c.Children.Add(new TextBlock { Text = "Schedules run on this PC only while Lanternly is running (closing the window keeps it in the tray), the PC is awake, Bluetooth is on and a bulb is in range. A run missed by more than 5 minutes is skipped, not run late.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 11, Margin = new Thickness(0, 2, 0, 8) });
+        if (_schedules.Count == 0) c.Children.Add(new TextBlock { Text = "No schedules yet.", Foreground = Br("Dim"), Margin = new Thickness(0, 0, 0, 6) });
+        foreach (var s in _schedules)
+        {
+            var sc = s; var home = _vault.Homes.FirstOrDefault(x => x.Id == s.HomeId);
+            var line = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
+            var del = new Button { Content = "Delete", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
+            System.Windows.Automation.AutomationProperties.SetName(del, "Delete schedule " + Schedules.Describe(home, s));
+            del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); SaveSchedules(); Render(); };
+            DockPanel.SetDock(del, Dock.Right); line.Children.Add(del);
+            var on = new CheckBox { Style = (Style)FindResource("Switch"), IsChecked = s.Enabled, VerticalAlignment = VerticalAlignment.Center, ToolTip = "Enabled" };
+            System.Windows.Automation.AutomationProperties.SetName(on, "Enabled: " + Schedules.Describe(home, s));
+            on.Click += (_, _) => { sc.Enabled = on.IsChecked == true; SaveSchedules(); };
+            DockPanel.SetDock(on, Dock.Right); line.Children.Add(on);
+            line.Children.Add(new TextBlock { Text = Schedules.Describe(home, s) + (_vault.Homes.Count > 1 && home != null ? $" ({home.Name})" : ""), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            c.Children.Add(line);
+        }
+        var row = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        var add = new Button { Content = "Add schedule…", Margin = new Thickness(0, 0, 6, 0), IsEnabled = CurrentHome != null };
+        add.Click += (_, _) =>
+        {
+            if (CurrentHome is not { } h) return;
+            if (Prompts.NewSchedule(this, h) is { } ns) { ns.Id = DateTime.UtcNow.Ticks; ns.HomeId = h.Id; _schedules.Add(ns); SaveSchedules(); Render(); }
+        };
+        var done = new Button { Content = "Done", Style = (Style)FindResource("AccentButton") };
+        done.Click += (_, _) => { _schedulesOpen = false; Render(); };
+        row.Children.Add(add); row.Children.Add(done);
+        c.Children.Add(row);
+        if (CurrentHome == null) c.Children.Add(new TextBlock { Text = "Add or import bulbs first.", Foreground = Br("Dim"), FontSize = 11 });
+        p.Children.Add(Card(c));
+        return p;
     }
 
     void ShowFromTray() { Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
@@ -186,7 +286,7 @@ public sealed class MainWindow : Window
         _homePick.ItemsSource = _vault.Homes.Select(h => h.Name).ToList();
         _homePick.SelectedIndex = _vault.Homes.Count == 0 ? -1 : Math.Clamp(_set.HomeIndex, 0, _vault.Homes.Count - 1);
         _homePick.Visibility = _vault.Homes.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        _body.Content = _settingsOpen ? SettingsPanel() : CurrentHome is { } h ? HomePanel(h) : EmptyPanel();
+        _body.Content = _settingsOpen ? SettingsPanel() : _schedulesOpen ? SchedulesPanel() : CurrentHome is { } h ? HomePanel(h) : EmptyPanel();
     }
 
     UIElement EmptyPanel()
@@ -373,6 +473,7 @@ public sealed class MainWindow : Window
                 if (KeyFile.IsProtected(text)) { pass = Prompts.Passphrase(this, "This key file is protected. Enter its passphrase:", confirm: false); if (pass == null) return; }
                 var v = KeyFile.Import(text, pass);
                 if (v.Homes.Count == 0) throw new InvalidDataException("no homes in file");
+                await StopAllBlinks(); // send pending stops over the old connection before it is replaced
                 _vault.Homes = v.Homes; Store.Unblock(); _set.BackedUp = true;
                 if (Save()) { _settingsOpen = false; await Reconnect(); }
             }
@@ -389,9 +490,9 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.2 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        about.Children.Add(Note("Lanternly 0.1.3 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
-        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await Teardown(); Store.Forget(); _vault = new(); _set.BackedUp = true; await Reconnect(); Render(); };
+        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);
         var done = new Button { Content = "Done", Style = (Style)FindResource("AccentButton"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0) };
         done.Click += (_, _) => { _settingsOpen = false; Render(); };
@@ -486,6 +587,50 @@ sealed class DemoLink : ILink
 
 static class Prompts
 {
+    /// <summary>Add-schedule dialog: time, days, action (on/off/scene) and target (all, a room or a bulb). Null on cancel.</summary>
+    public static Schedule? NewSchedule(Window owner, Home h)
+    {
+        var w = new Window { Owner = owner, Title = "Add schedule", SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)Application.Current.Resources["Bg"] };
+        var p = new StackPanel { Margin = new Thickness(16), Width = 340 };
+        TextBlock L(string t) => new() { Text = t, Margin = new Thickness(0, 6, 0, 2) };
+        p.Children.Add(L("Time (24-hour)"));
+        var time = new StackPanel { Orientation = Orientation.Horizontal };
+        var hh = new ComboBox { ItemsSource = Enumerable.Range(0, 24).Select(i => i.ToString("00")).ToList(), SelectedIndex = 7, Width = 64 };
+        var mm = new ComboBox { ItemsSource = Enumerable.Range(0, 60).Select(i => i.ToString("00")).ToList(), SelectedIndex = 0, Width = 64, Margin = new Thickness(6, 0, 0, 0) };
+        System.Windows.Automation.AutomationProperties.SetName(hh, "Hour"); System.Windows.Automation.AutomationProperties.SetName(mm, "Minute");
+        time.Children.Add(hh); time.Children.Add(new TextBlock { Text = ":", Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center }); time.Children.Add(mm);
+        p.Children.Add(time);
+        p.Children.Add(L("Days"));
+        var days = new WrapPanel();
+        var boxes = Schedules.DayNames.Select(n => new CheckBox { Content = n, IsChecked = true, Margin = new Thickness(0, 0, 8, 4) }).ToList();
+        boxes.ForEach(b => days.Children.Add(b));
+        p.Children.Add(days);
+        p.Children.Add(L("Action"));
+        var act = new ComboBox { ItemsSource = Schedules.Actions.Select(Schedules.ActionText).ToList(), SelectedIndex = 0 };
+        System.Windows.Automation.AutomationProperties.SetName(act, "Action");
+        p.Children.Add(act);
+        p.Children.Add(L("Bulbs"));
+        var targets = new List<(string Id, string Name)> { ("all", "All bulbs") };
+        targets.AddRange(h.Rooms.Select(r => ("room:" + r.Id, "Room: " + r.Name)));
+        targets.AddRange(h.Bulbs.Select(b => ("bulb:" + b.MeshId, b.Name)));
+        var tgt = new ComboBox { ItemsSource = targets.Select(t => t.Name).ToList(), SelectedIndex = 0 };
+        System.Windows.Automation.AutomationProperties.SetName(tgt, "Bulbs");
+        p.Children.Add(tgt);
+        p.Children.Add(new TextBlock { Text = "Scenes set color only on bulbs that support it. Runs while Lanternly is running and the PC is awake.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = (Brush)Application.Current.Resources["Dim"], Margin = new Thickness(0, 8, 0, 0) });
+        var err = new TextBlock { Foreground = Brushes.IndianRed }; p.Children.Add(err);
+        var ok = new Button { Content = "Add", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        Schedule? result = null;
+        ok.Click += (_, _) =>
+        {
+            int mask = 0; for (int i = 0; i < 7; i++) if (boxes[i].IsChecked == true) mask |= 1 << i;
+            if (mask == 0) { err.Text = "Choose at least one day."; return; }
+            result = new Schedule { Hour = hh.SelectedIndex, Minute = mm.SelectedIndex, Days = mask, Action = Schedules.Actions[act.SelectedIndex], Target = targets[tgt.SelectedIndex].Id };
+            w.DialogResult = true;
+        };
+        p.Children.Add(ok); w.Content = p;
+        return w.ShowDialog() == true ? result : null;
+    }
+
     /// <summary>Small modal passphrase prompt. Returns null on cancel.</summary>
     public static string? Passphrase(Window owner, string text, bool confirm)
     {

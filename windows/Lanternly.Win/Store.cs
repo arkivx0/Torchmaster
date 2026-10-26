@@ -22,6 +22,7 @@ public static class Store
     public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lanternly");
     static string VaultPath => Path.Combine(Dir, "vault.bin");
     static string SettingsPath => Path.Combine(Dir, "settings.json");
+    static string SchedulesPath => Path.Combine(Dir, "schedules.json");
     static readonly byte[] Entropy = "Lanternly.vault.v1"u8.ToArray();
 
     /// <summary>Set when the vault failed to load: path of the quarantined copy. Saves are refused while set.</summary>
@@ -65,9 +66,22 @@ public static class Store
     }
     public static void SaveSettings(Settings s) { Directory.CreateDirectory(Dir); File.WriteAllText(SettingsPath, JsonSerializer.Serialize(s)); }
 
+    /// <summary>Schedules (times, days, action, target ids; no keys), stored next to settings.json.</summary>
+    public static List<Schedule> LoadSchedules()
+    {
+        try { return File.Exists(SchedulesPath) ? Schedules.FromJson(File.ReadAllText(SchedulesPath)) : []; }
+        catch (Exception ex) { Program.Log(ex, "schedules load"); return []; }
+    }
+    public static void SaveSchedules(List<Schedule> l)
+    {
+        Directory.CreateDirectory(Dir);
+        File.WriteAllText(SchedulesPath + ".tmp", Schedules.ToJson(l));
+        File.Move(SchedulesPath + ".tmp", SchedulesPath, true);
+    }
+
     public static void Forget()
     {
-        foreach (var f in new[] { VaultPath, SettingsPath, Path.Combine(Dir, "bridge-cert.bin") /* 0.1.x leftovers */ })
+        foreach (var f in new[] { VaultPath, SettingsPath, SchedulesPath, Path.Combine(Dir, "bridge-cert.bin") /* 0.1.x leftovers */ })
             try { File.Delete(f); } catch (Exception ex) { Program.Log(ex, "forget"); }
         Quarantined = null;
     }

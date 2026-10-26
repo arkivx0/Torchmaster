@@ -1,4 +1,4 @@
-# Real-bulb test checklist (0.1.2)
+# Real-bulb test checklist (0.1.3)
 
 Use one test bulb you don't mind resetting. Report for each step: works / fails, plus the exact status-line text.
 Windows crash details: `%LOCALAPPDATA%\Lanternly\crash.log` (types and stack traces only).
@@ -39,3 +39,24 @@ Windows crash details: `%LOCALAPPDATA%\Lanternly\crash.log` (types and stack tra
 
 ## D. Recovery
 1. Forget everything, then Import key file: the bulb is controllable again without another reset.
+2. Tap ◎ (find), then Forget everything or Import right away: the bulb stops blinking and no stray
+   "not reachable" message appears. Same when switching homes mid-blink.
+
+## E. Schedules (0.1.3)
+Use times 2–3 minutes ahead. Report the status line (Windows) or the "Last run" line on the Schedules page (Android).
+1. Open ⏰ Schedules → Add schedule: today, 2 minutes ahead, "Turn on", target the test bulb. Turn the bulb off
+   first. At that time it turns on. Repeat with "Turn off".
+2. Add one with "Scene: Red" on All bulbs: at that time the bulb is on, full brightness, red.
+3. Add one for a day that is not today: nothing happens today. Turn a due schedule's switch off: it does not run.
+   Delete one: it disappears and does not run.
+4. Android:
+   1. Close the app (✕) and lock the phone; keep it near the bulb with Bluetooth on. The schedule still runs.
+   2. Reboot the phone (don't open Lanternly), wait for a schedule: it still runs.
+   3. Change the phone's time zone or clock, then back: schedules still run at the right local time.
+   4. Settings → Apps → Special app access → Alarms & reminders: if Lanternly shows there (Android 12), turn it off.
+      The Schedules page shows the exact-alarm warning and "Allow exact alarms" opens the setting. Runs may be late.
+   5. Turn Bluetooth off before a run: "Last run" says it was not reachable; the next run still happens.
+5. Windows:
+   1. Close the window (it stays in the tray): the schedule still runs; the tray tooltip shows the result.
+   2. Put the PC to sleep across a schedule and wake it more than 5 minutes later: the missed run does not happen.
+   3. Quit from the tray: no schedule runs until Lanternly is started again.

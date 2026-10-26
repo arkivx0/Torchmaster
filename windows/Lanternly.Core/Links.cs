@@ -122,11 +122,14 @@ public sealed class BleSession : ILink, IAsyncDisposable
 
     readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    /// <summary>How long a command waits for the previous write, and how long one write may take.</summary>
+    public TimeSpan WriteTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
     public Task SendAsync(Home h, Bulb b, Cmd c, CancellationToken ct = default)
-        => Send(b.MeshId, c);
+        => Send(b.MeshId, c, ct);
 
     /// <summary>Writes are serialized per session, so commands reach the bulb in the order they were issued.</summary>
-    public async Task Send(ushort target, Cmd c)
+    public async Task Send(ushort target, Cmd c, CancellationToken ct = default)
     {
         var (cmd, data) = c switch
         {
@@ -137,11 +140,12 @@ public sealed class BleSession : ILink, IAsyncDisposable
             Cmd.Identify i => (Ble.CmdIdentify, Ble.IdentifyData(i.Start)),
             _ => throw new ArgumentException("unknown command"),
         };
-        await _writeLock.WaitAsync();
+        // A GATT write that never completes must not block every later command: both waits time out.
+        if (!await _writeLock.WaitAsync(WriteTimeout, ct)) throw new TimeoutException("Bluetooth busy (previous command did not finish)");
         try
         {
             var pkt = Ble.Command(_sk ?? throw new InvalidOperationException("BLE not logged in"), _mac, NextSeq(), target, cmd, data);
-            await _g.WriteAsync(Ble.CommandChar, pkt, false);
+            await _g.WriteAsync(Ble.CommandChar, pkt, false).WaitAsync(WriteTimeout, ct);
         }
         finally { _writeLock.Release(); }
     }
