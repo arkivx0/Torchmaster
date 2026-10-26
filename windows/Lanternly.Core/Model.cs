@@ -14,6 +14,8 @@ public sealed class Bulb
     public int Type { get; set; }
     public string Mac { get; set; } = "";       // BLE MAC (AA:BB:...)
     [JsonIgnore] public Caps Caps => DeviceCaps.For(Type);
+    /// <summary>False for 0 (not learned yet: commands would reach whichever bulb is connected) and group addresses.</summary>
+    [JsonIgnore] public bool AddressKnown => MeshId is >= 1 and <= 0x7FFF;
     [JsonIgnore] public BulbState? State { get; set; }
     [JsonIgnore] public Via Via { get; set; }
 }

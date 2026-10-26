@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.6 (unreleased, Android versionCode 8)
+- **Light shows.** An Effects menu for all bulbs, each room and each bulb. Twelve built-in shows run inside the
+  bulb (Candlelight, Rainbow, Fireworks, Volcanic, Aurora, Happy Holidays, Red White & Blue, Vegas, Party Time,
+  Power Up, Splash, Cyber), on full-color bulbs. Three **app-side** effects (Color cycle, Candle flicker, Breathe)
+  are sent step by step by Lanternly while it stays open, at most 4 commands a second. A **Now playing / Stop** bar
+  shows whatever is running. Windows also has Effects in the tray menu.
+- **Sunrise and sunset schedules** with an offset of up to ±180 minutes. Enter latitude/longitude in settings
+  (optional); sun times are computed on the device, with no location permission. New schedule actions: start or
+  stop a built-in effect, and **fade in** (wake-up) or **fade out** over 5–60 minutes. Time/day schedules are
+  unchanged, and older schedule files still load.
+- **Windows now matches Android** for all of the above.
+- Key files where two bulbs share an address now import, with a warning (Reset still refuses those bulbs).
+  Stored keys are checked the same way on load. Bulbs with no known address show "address unknown", and their own
+  controls are turned off.
+- Reset bulb: the confirmation scan no longer blocks other controls on Android. Keep reconnects. A bulb with no
+  Bluetooth address on file is explained instead of scanned for. You choose which of its schedules to delete.
+- Design review fixes: named 48dp color swatches with a ✓ on the current one, 48dp touch targets, a high-contrast
+  "Backup needed" banner with Export now, screen-reader labels for switches, sliders and swatches, announced status
+  changes, keyboard focus rings on Windows, higher-contrast muted text, and theme colors in one shared file
+  (`spec/theme_tokens.json`).
+
 ## 0.1.5 (unreleased, Android versionCode 7)
 Reset bulb fixes from the 0.1.4 review:
 - **A reset bulb's own schedules are deleted** (schedules whose target is that bulb alone, in that home), with their

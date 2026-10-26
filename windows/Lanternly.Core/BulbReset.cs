@@ -22,7 +22,8 @@ public static class BulbReset
     public const string UnconfirmedTitle = "Couldn't confirm the reset";
     public static string UnconfirmedText(Bulb b) =>
         $"The reset was sent, but \"{b.Name}\" was not seen restarting as a reset bulb. It may be out of range and still paired.\n\n" +
-        "Yes = Keep: leave it in this home (you can try again closer).\nNo = Remove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back).";
+        (CanConfirm(b) ? "" : NoMacText(b) + "\n\n") +
+        "Yes = Keep: leave it in this home (you can try again closer; Lanternly reconnects).\nNo = Remove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back).";
 
     /// <summary>Why this bulb must not be reset from the app, or null when it can.</summary>
     public static string? RefuseReason(Home h, Bulb b) =>
@@ -55,15 +56,33 @@ public static class BulbReset
         foreach (var room in h.Rooms) room.MeshIds.RemoveAll(m => m == b.MeshId);
     }
 
-    /// <summary>Key-file import check: every bulb/room address must be 0 (unknown) or 1..0x7FFF, and no two bulbs of a home may share one.</summary>
+    /// <summary>Key-file import check: every bulb/room address must be 0 (unknown) or 1..0x7FFF. Shared addresses import with a warning (<see cref="AddressWarnings"/>).</summary>
     public static void CheckImport(Vault v)
     {
         foreach (var h in v.Homes)
         {
             if (h.Bulbs.FirstOrDefault(b => b.MeshId > MaxAddress) is { } bad) throw new InvalidDataException($"bulb \"{bad.Name}\" has invalid mesh address {bad.MeshId}");
             if (h.Rooms.FirstOrDefault(r => r.MeshIds.Any(m => m > MaxAddress)) is { } br) throw new InvalidDataException($"room \"{br.Name}\" has an invalid mesh address");
-            if (h.Bulbs.Where(b => b.MeshId != 0).GroupBy(b => b.MeshId).FirstOrDefault(g => g.Count() > 1) is { } d)
-                throw new InvalidDataException($"bulbs \"{d.First().Name}\" and \"{d.Skip(1).First().Name}\" share mesh address {d.Key}");
         }
     }
+
+    /// <summary>Problems worth showing after an import or when the stored vault loads. Nothing is changed.</summary>
+    public static List<string> AddressWarnings(Vault v)
+    {
+        var w = new List<string>();
+        foreach (var h in v.Homes)
+        {
+            foreach (var g in h.Bulbs.Where(b => b.MeshId != 0).GroupBy(b => b.MeshId).Where(g => g.Count() > 1))
+                w.Add($"{string.Join(" and ", g.Select(b => $"\"{b.Name}\""))} share mesh address {g.Key}: a command to one reaches both, and Reset is refused for them.");
+            foreach (var b in h.Bulbs.Where(b => b.MeshId > MaxAddress)) w.Add($"\"{b.Name}\" has invalid mesh address {b.MeshId}; its own controls are disabled.");
+            foreach (var r in h.Rooms.Where(r => r.MeshIds.Any(m => m > MaxAddress))) w.Add($"Room \"{r.Name}\" lists an invalid mesh address.");
+            var unknown = h.Bulbs.Count(b => b.MeshId == 0);
+            if (unknown > 0) w.Add($"{unknown} bulb(s) have no known mesh address (shown as \"address unknown\"); their own controls are disabled until they are added again.");
+        }
+        return w;
+    }
+
+    /// <summary>A bulb with no Bluetooth address on file can't be recognised in the confirmation scan.</summary>
+    public static bool CanConfirm(Bulb b) => b.Mac.Replace(":", "").Replace("-", "").Length == 12;
+    public static string NoMacText(Bulb b) => $"\"{b.Name}\" has no Bluetooth address on file, so Lanternly can't recognise it when it restarts as a reset bulb; the reset can't be confirmed. If it blinks or turns on at full white after the reset, choose Remove anyway.";
 }

@@ -8,13 +8,19 @@ Not affiliated with GE Lighting, Savant or Cync.
   GE cloud host name or a networking API ever appears in the source (`OfflineTests`, `OfflineTest.kt`).
 - **Rooms and bulbs.** On/off, brightness, color temperature and RGB. Rooms get on/off and brightness.
 - **Quick scenes.** Bright, Relax, Focus, Night, Red, Off. Multi-bulb actions report results, e.g. "3/5 bulbs updated".
-- **Schedules.** On, off or a scene for a bulb, a room or all bulbs at set times and days. They run on the device
+- **Light shows.** 12 built-in effects that run inside full-color bulbs (the same command the Cync app sends), plus
+  3 app-side effects (color cycle, candle flicker, breathe) that Lanternly sends while it is open, rate limited.
+  Per bulb, room or all bulbs, with a Now playing / Stop bar.
+- **Schedules.** On, off, a scene, an effect, or a fade in/out (5–60 min) for a bulb, a room or all bulbs, at set
+  times or at sunrise/sunset ± an offset, on chosen days. Sun times are computed offline from coordinates you type in
+  settings (optional; no location permission). They run on the device
   itself over Bluetooth (Android: system alarms, also after a reboot; Windows: while Lanternly runs in the tray),
   so the phone or PC must be near the bulbs. A run more than 10 minutes late is skipped, not run late; a run that
   reaches no bulb is retried within those 10 minutes. On Android a run shows a small "Running a schedule"
   notification while it works. Note for store builds: Android's USE_EXACT_ALARM is restricted on Google Play to
   alarm-clock and calendar apps; a Play build would use SCHEDULE_EXACT_ALARM and its existing inexact fallback.
-- **Dark Tokyo Night theme.** Windows has a tray icon with All on / All off / scenes.
+- **Dark Tokyo Night theme** from one token file (`spec/theme_tokens.json`). Windows has a tray icon with
+  All on / All off / scenes / effects.
 - **No telemetry.** Keys are never logged. They are stored with Android Keystore (AES-GCM) or Windows DPAPI.
 
 ## Getting your bulbs in

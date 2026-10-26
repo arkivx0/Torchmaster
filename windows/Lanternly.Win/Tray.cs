@@ -10,6 +10,8 @@ public sealed class Tray : IDisposable
     public event Action? Open, Quit;
     public event Action<bool>? AllPower;
     public event Action<Scenes.Scene>? Scene;
+    /// <summary>Native light show id for all bulbs; 0 = stop.</summary>
+    public event Action<int>? Effect;
 
     public Tray()
     {
@@ -21,6 +23,11 @@ public sealed class Tray : IDisposable
         var sc = new F.ToolStripMenuItem("Scenes");
         foreach (var s in Scenes.All.Where(s => s.Name != "Off")) { var x = s; sc.DropDownItems.Add(s.Name, null, (_, _) => Scene?.Invoke(x)); }
         m.Items.Add(sc);
+        var fx = new F.ToolStripMenuItem("Effects");
+        fx.DropDownItems.Add("■ Stop effect", null, (_, _) => Effect?.Invoke(0));
+        fx.DropDownItems.Add(new F.ToolStripSeparator());
+        foreach (var e in Effects.All) { var id = e.Id; fx.DropDownItems.Add(e.Name, null, (_, _) => Effect?.Invoke(id)); }
+        m.Items.Add(fx);
         m.Items.Add(new F.ToolStripSeparator());
         m.Items.Add("Quit", null, (_, _) => Quit?.Invoke());
         _icon.ContextMenuStrip = m;

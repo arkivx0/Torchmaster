@@ -11,6 +11,8 @@ sealed class Cmd {
     data class Identify(val start: Boolean) : Cmd()   // blink to find a bulb; no state change
     /** Erase the bulb's mesh pairing (Telink kick-out 0xE3 01). The bulb returns to telink_mesh1/123. */
     object FactoryReset : Cmd()
+    /** Native light show [id] (see [Effects.NATIVE]); 0 stops it (static mode). */
+    data class Effect(val id: Int) : Cmd()
 }
 
 interface Link {
@@ -66,7 +68,7 @@ object Scenes {
         for (b in only) try { for (c in stepsFor(s, b)) r.send(h, b, c); ok++ } catch (e: Exception) { if (first == null) first = "${b.name}: ${e.message}"; Diag.log("scene", e) }
         return BatchResult(ok, only.size, first)
     }
-    fun stepsFor(s: Scene, b: Bulb) = s.steps.filter { when (it) { is Cmd.Brightness -> b.has(Caps.DIM); is Cmd.Temp -> b.has(Caps.TEMP); is Cmd.Rgb -> b.has(Caps.COLOR); else -> true } }
+    fun stepsFor(s: Scene, b: Bulb) = s.steps.filter { when (it) { is Cmd.Brightness -> b.has(Caps.DIM); is Cmd.Temp -> b.has(Caps.TEMP); is Cmd.Rgb, is Cmd.Effect -> b.has(Caps.COLOR); else -> true } }
 }
 
 /** Minimal GATT surface (Android BluetoothGatt or a test fake). Calls block until done. */
@@ -107,6 +109,7 @@ class BleSession(private val g: GattPort, val home: Home) : Link {
             is Cmd.Rgb -> Ble.CMD_COLOR to Ble.rgbData(c.r, c.g, c.b)
             is Cmd.Identify -> Ble.CMD_IDENTIFY to Ble.identifyData(c.start)
             is Cmd.FactoryReset -> Ble.CMD_KICK_OUT to Ble.kickOutData()
+            is Cmd.Effect -> Ble.CMD_COLOR to Effects.data(c.id)
         }
         val key = sk ?: throw NotReachable("BLE not logged in")
         g.write(Ble.COMMAND, Ble.command(key, mac, nextSeq(), b.meshId, cmd, data), false)

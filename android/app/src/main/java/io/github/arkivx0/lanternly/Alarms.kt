@@ -72,7 +72,8 @@ object Alarms {
     fun plan(ctx: Context, s: Schedule) {
         cancelOne(ctx, s.id, false)
         if (!s.enabled) { cancelOne(ctx, s.id, true); return }
-        val t = Schedules.nextFireAfter(s, ZonedDateTime.now(), Store(ctx).lastFired(s.id))?.toInstant()?.toEpochMilli() ?: return
+        val st = Store(ctx)
+        val t = Schedules.nextFireAfter(s, ZonedDateTime.now(), st.lastFired(s.id), st.sunLocation)?.toInstant()?.toEpochMilli() ?: return
         set(ctx, t, pi(ctx, s.id, t, 0, PendingIntent.FLAG_UPDATE_CURRENT) ?: return)
     }
 
@@ -158,8 +159,9 @@ class ScheduleService : Service() {
         val i = intent ?: run { if (active.get() == 0) stopSelf(startId); return START_NOT_STICKY }
         active.incrementAndGet()
         queue.execute {
-            val f = worker.submit { ScheduleJob.run(applicationContext, i, ScheduleJob.SERVICE_BUDGET_MS) }
-            try { f.get(ScheduleJob.SERVICE_BUDGET_MS + 5_000, TimeUnit.MILLISECONDS) }
+            val budget = ScheduleJob.budgetFor(applicationContext, i)
+            val f = worker.submit { ScheduleJob.run(applicationContext, i, budget) }
+            try { f.get(budget + 5_000, TimeUnit.MILLISECONDS) }
             catch (e: TimeoutException) { f.cancel(true); ScheduleJob.failed(applicationContext, i, "timed out") }
             catch (e: Exception) { Diag.log("schedule", e) }
             finally { if (active.decrementAndGet() == 0) stopSelf(lastStartId) }
@@ -189,7 +191,13 @@ object ScheduleJob {
     const val SERVICE_BUDGET_MS = 40_000L
     const val RECEIVER_BUDGET_MS = 8_000L
 
-    private fun label(s: Schedule) = "%02d:%02d %s".format(s.hour, s.minute, Schedules.actionText(s.action))
+    private fun label(s: Schedule) = "${Schedules.whenText(s)} ${Schedules.actionText(s.action)}"
+
+    /** Normal runs: [SERVICE_BUDGET_MS]. Fades keep the connection for their whole length. */
+    fun budgetFor(ctx: Context, intent: Intent): Long = try {
+        val id = intent.getLongExtra(Alarms.EXTRA_ID, 0)
+        SERVICE_BUDGET_MS + (Store(ctx).loadSchedules().firstOrNull { it.id == id }?.let { Schedules.extraRunMs(it) } ?: 0L)
+    } catch (e: Exception) { Diag.log("schedule budget", e); SERVICE_BUDGET_MS }
     private fun note(store: Store, s: Schedule, msg: String) {
         store.lastRun = "${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date())} · ${label(s)}: $msg"
     }
@@ -229,8 +237,9 @@ object ScheduleJob {
         Connection.shared(h.id)?.let { ses ->
             val ex = Executors.newSingleThreadExecutor()
             try {
-                val f = ex.submit<BatchResult> { Schedules.run(Router(listOf(ses)), ses.home, s) }
-                val res = f.get(maxOf(1_000L, (deadline - System.currentTimeMillis()) / 2), TimeUnit.MILLISECONDS)
+                val f = ex.submit<BatchResult> { Schedules.run(Router(listOf(ses)), ses.home, s, deadline - 2_000) }
+                val extra = Schedules.extraRunMs(s) // a fade owns most of the budget
+                val res = f.get(maxOf(1_000L, if (extra > 0) deadline - System.currentTimeMillis() - 1_000 else (deadline - System.currentTimeMillis()) / 2), TimeUnit.MILLISECONDS)
                 if (res.ok > 0) { note(store, s, "$res (app connection)"); return }
                 last = res.firstError
             } catch (e: TimeoutException) { Diag.log("schedule shared timeout", e); last = "app connection timed out"
@@ -246,7 +255,7 @@ object ScheduleJob {
             try {
                 ses = BleSession(AndroidGatt.connect(ctx, mac, deadline), h)
                 ses.login()
-                val res = Schedules.run(Router(listOf(ses)), h, s)
+                val res = Schedules.run(Router(listOf(ses)), h, s, deadline - 2_000)
                 Thread.sleep(400) // let the last unacknowledged write leave the radio before disconnecting
                 if (res.ok > 0) { note(store, s, res.toString()); return }
                 last = res.firstError

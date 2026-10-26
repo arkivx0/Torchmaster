@@ -18,6 +18,10 @@ public sealed class Schedule
     public string Action { get; set; } = "on";
     public long HomeId { get; set; }
     public string Target { get; set; } = "all";
+    /// <summary>"time" (default; 0.1.5 files have none), "sunrise" or "sunset". Hour/Minute are ignored for sun triggers.</summary>
+    public string Trigger { get; set; } = "time";
+    /// <summary>Minutes after (+) or before (−) sunrise/sunset, −180..180.</summary>
+    public int Offset { get; set; }
 }
 
 public static class Schedules
@@ -28,21 +32,38 @@ public static class Schedules
     public static readonly string[] DayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     public static readonly string[] Actions = ["on", "off", .. Scenes.All.Where(s => s.Name != "Off").Select(s => s.Name)];
 
+    public static readonly string[] Triggers = ["time", "sunrise", "sunset"];
+    public const int MaxOffset = 180;
+    public static readonly int[] FadeMinutes = [5, 10, 15, 20, 30, 45, 60];
+    /// <summary>Every action the editor offers: on/off, scenes, native effects and stop, fades. Actions ("effect:id", "fadein:min", "fadeout:min") as in Schedules.kt.</summary>
+    public static readonly string[] AllActions = [.. Actions, .. Effects.All.Select(e => $"effect:{e.Id}"), "effect:0", .. FadeMinutes.Select(m => $"fadein:{m}"), .. FadeMinutes.Select(m => $"fadeout:{m}")];
+    static readonly System.Text.RegularExpressions.Regex EffectRx = new(@"^effect:(\d{1,3})$"), FadeRx = new(@"^fade(in|out):(\d{1,2})$");
+    public static bool ValidAction(string? a) => a != null && (Actions.Contains(a)
+        || EffectRx.Match(a) is { Success: true } m && (int.Parse(m.Groups[1].Value) is var id && (id == 0 || Effects.Find(id) != null))
+        || FadeRx.Match(a) is { Success: true } f && int.Parse(f.Groups[2].Value) is >= 1 and <= Fades.MaxMinutes);
+    public static int? FadeMins(string a) => FadeRx.Match(a) is { Success: true } f ? int.Parse(f.Groups[2].Value) : null;
+    /// <summary>Extra run time beyond one command per bulb (fades).</summary>
+    public static TimeSpan ExtraRun(Schedule s) => FadeMins(s.Action) is { } m ? Fades.Duration(m) : TimeSpan.Zero;
+
     public static int DayBit(DayOfWeek d) => 1 << (((int)d + 6) % 7);
 
     /// <summary>
     /// Next time strictly after <paramref name="now"/>. DST: a time skipped by spring-forward runs shifted by the gap
     /// (02:30 → 03:30); a time repeated by fall-back runs once, at its first occurrence. Null if no day is selected.
     /// </summary>
-    public static DateTimeOffset? NextFire(Schedule s, DateTimeOffset now, TimeZoneInfo tz)
+    public static DateTimeOffset? NextFire(Schedule s, DateTimeOffset now, TimeZoneInfo tz, SunLocation? loc = null)
     {
         if ((s.Days & EveryDay) == 0) return null;
+        bool sun = s.Trigger is "sunrise" or "sunset";
+        if (sun && loc == null) return null; // needs coordinates in settings
         var today = TimeZoneInfo.ConvertTime(now, tz).Date;
-        for (int i = 0; i <= 8; i++)
+        for (int i = -1; i <= (sun ? 400 : 8); i++) // near the poles the sun may not rise or set for months
         {
             var day = today.AddDays(i);
             if ((s.Days & DayBit(day.DayOfWeek)) == 0) continue;
-            var t = Resolve(day.AddHours(s.Hour).AddMinutes(s.Minute), tz);
+            DateTimeOffset t;
+            if (sun) { if (Sun.Event(DateOnly.FromDateTime(day), loc!, s.Trigger == "sunrise", tz) is not { } e) continue; t = e.AddMinutes(s.Offset); }
+            else t = Resolve(day.AddHours(s.Hour).AddMinutes(s.Minute), tz);
             if (t > now) return t;
         }
         return null;
@@ -64,10 +85,10 @@ public static class Schedules
     public static bool IsReplay(DateTimeOffset due, long lastFiredMs) => lastFiredMs > 0 && due.ToUnixTimeMilliseconds() <= lastFiredMs;
 
     /// <summary>Next run strictly after both <paramref name="now"/> and the last fired time.</summary>
-    public static DateTimeOffset? NextFireAfter(Schedule s, DateTimeOffset now, TimeZoneInfo tz, long lastFiredMs)
+    public static DateTimeOffset? NextFireAfter(Schedule s, DateTimeOffset now, TimeZoneInfo tz, long lastFiredMs, SunLocation? loc = null)
     {
         var last = DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(0, lastFiredMs));
-        return NextFire(s, lastFiredMs > 0 && last > now ? last : now, tz);
+        return NextFire(s, lastFiredMs > 0 && last > now ? last : now, tz, loc);
     }
 
     /// <summary>Null when the entry is usable, else why not.</summary>
@@ -76,7 +97,9 @@ public static class Schedules
         : s.Hour is < 0 or > 23 ? $"hour {s.Hour}"
         : s.Minute is < 0 or > 59 ? $"minute {s.Minute}"
         : s.Days is < 0 or > EveryDay ? $"days {s.Days}"
-        : !Actions.Contains(s.Action) ? $"action {s.Action}"
+        : !ValidAction(s.Action) ? $"action {s.Action}"
+        : !Triggers.Contains(s.Trigger) ? $"trigger {s.Trigger}"
+        : s.Offset is < -MaxOffset or > MaxOffset ? $"offset {s.Offset}"
         : !(s.Target == "all" || System.Text.RegularExpressions.Regex.IsMatch(s.Target ?? "", @"^(room|bulb):\d{1,9}$")) ? $"target {s.Target}"
         : null;
 
@@ -106,13 +129,30 @@ public static class Schedules
         var d => string.Join(" ", DayNames.Where((_, i) => (d & (1 << i)) != 0)),
     };
 
-    public static string ActionText(string a) => a switch { "on" => "Turn on", "off" => "Turn off", _ => "Scene: " + a };
-    public static string Describe(Home? h, Schedule s) => $"{s.Hour:00}:{s.Minute:00} · {DaysText(s.Days)} · {ActionText(s.Action)} · {TargetName(h, s)}";
+    public static string ActionText(string a) => a switch
+    {
+        "on" => "Turn on", "off" => "Turn off",
+        var x when x.StartsWith("effect:") => int.TryParse(x[7..], out var id) ? (id == 0 ? "Stop effect" : "Effect: " + Effects.Name(id)) : x,
+        var x when x.StartsWith("fadein:") => $"Fade in over {FadeMins(x)} min (wake-up)",
+        var x when x.StartsWith("fadeout:") => $"Fade out over {FadeMins(x)} min",
+        _ => "Scene: " + a,
+    };
+    public static string WhenText(Schedule s) => s.Trigger is "sunrise" or "sunset"
+        ? (s.Trigger == "sunrise" ? "Sunrise" : "Sunset") + (s.Offset > 0 ? $" +{s.Offset} min" : s.Offset < 0 ? $" −{-s.Offset} min" : "")
+        : $"{s.Hour:00}:{s.Minute:00}";
+    public static string Describe(Home? h, Schedule s) => $"{WhenText(s)} · {DaysText(s.Days)} · {ActionText(s.Action)} · {TargetName(h, s)}";
 
     /// <summary>Runs the action on the targets over the given router.</summary>
     public static async Task<BatchResult> RunAsync(Router r, Home h, Schedule s, CancellationToken ct = default)
     {
-        var bulbs = Targets(h, s);
+        var bulbs = Targets(h, s).Where(b => b.AddressKnown).ToList();
+        if (FadeMins(s.Action) is { } mins) return await Fades.RunAsync(r, h, bulbs, s.Action.StartsWith("fadein:"), mins, ct);
+        if (s.Action.StartsWith("effect:"))
+        {
+            var color = bulbs.Where(Effects.Supports).ToList();
+            if (color.Count == 0) return new BatchResult(0, bulbs.Count, "no full-color bulb for effects");
+            return await r.SendManyAsync(h, color, new Cmd.Effect(int.Parse(s.Action[7..])), ct);
+        }
         if (s.Action == "on" || s.Action == "off") return await r.SendManyAsync(h, bulbs, new Cmd.Power(s.Action == "on"), ct);
         var scene = Scenes.All.FirstOrDefault(x => x.Name == s.Action) ?? throw new InvalidDataException("unknown scene " + s.Action);
         return await Scenes.ApplyAsync(r, h, scene, bulbs);

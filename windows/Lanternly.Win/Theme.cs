@@ -20,22 +20,41 @@ public static class Theme
         catch (Exception ex) { Program.Log(ex, "dark title bar"); }
     }
 
-    public static ResourceDictionary Load() => (ResourceDictionary)XamlReader.Parse(Xaml);
+    /// <summary>Theme XAML with the shared color tokens (Lanternly.Core.Tokens, from spec/theme_tokens.json) filled in.</summary>
+    public static ResourceDictionary Load()
+    {
+        var x = Xaml;
+        foreach (var (k, v) in Lanternly.Core.Tokens.Colors) x = x.Replace("{" + k + "}", v);
+        return (ResourceDictionary)XamlReader.Parse(x);
+    }
 
     const string Xaml = """
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Color x:Key="BgC">#1A1B26</Color>
-  <SolidColorBrush x:Key="Bg" Color="#1A1B26"/>
-  <SolidColorBrush x:Key="Card" Color="#24283B"/>
-  <SolidColorBrush x:Key="Ctl" Color="#2F3549"/>
-  <SolidColorBrush x:Key="CtlHover" Color="#3B4261"/>
-  <SolidColorBrush x:Key="Line" Color="#414868"/>
-  <SolidColorBrush x:Key="Fg" Color="#C0CAF5"/>
-  <SolidColorBrush x:Key="Dim" Color="#7982A9"/>
-  <SolidColorBrush x:Key="Accent" Color="#7AA2F7"/>
-  <SolidColorBrush x:Key="Yellow" Color="#E0AF68"/>
-  <SolidColorBrush x:Key="AccentFg" Color="#1A1B26"/>
+  <Color x:Key="BgC">{bg}</Color>
+  <SolidColorBrush x:Key="Bg" Color="{bg}"/>
+  <SolidColorBrush x:Key="Card" Color="{card}"/>
+  <SolidColorBrush x:Key="Ctl" Color="{ctl}"/>
+  <SolidColorBrush x:Key="CtlHover" Color="{ctlHover}"/>
+  <SolidColorBrush x:Key="Line" Color="{line}"/>
+  <SolidColorBrush x:Key="Fg" Color="{fg}"/>
+  <SolidColorBrush x:Key="Dim" Color="{dim}"/>
+  <SolidColorBrush x:Key="Accent" Color="{accent}"/>
+  <SolidColorBrush x:Key="Yellow" Color="{warn}"/>
+  <SolidColorBrush x:Key="Warn" Color="{warn}"/>
+  <SolidColorBrush x:Key="OnWarn" Color="{onWarn}"/>
+  <SolidColorBrush x:Key="AccentFg" Color="{onAccent}"/>
+  <SolidColorBrush x:Key="Focus" Color="{focus}"/>
+  <!-- keyboard focus ring: 2px outline (restored in 0.1.6; was removed everywhere) -->
+  <Style x:Key="FocusRing">
+    <Setter Property="Control.Template">
+      <Setter.Value>
+        <ControlTemplate>
+          <Rectangle Margin="-3" StrokeThickness="2" Stroke="{StaticResource Focus}" RadiusX="7" RadiusY="7" SnapsToDevicePixels="True"/>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
 
   <Style TargetType="Window">
     <Setter Property="Background" Value="{StaticResource Bg}"/>
@@ -51,9 +70,10 @@ public static class Theme
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
     <Setter Property="Background" Value="{StaticResource Ctl}"/>
     <Setter Property="Padding" Value="10,4"/>
+    <Setter Property="MinHeight" Value="32"/><Setter Property="MinWidth" Value="32"/>
     <Setter Property="Margin" Value="0,0,6,0"/>
     <Setter Property="Cursor" Value="Hand"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
@@ -64,7 +84,7 @@ public static class Theme
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{StaticResource CtlHover}"/></Trigger>
             <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
-            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
@@ -83,7 +103,7 @@ public static class Theme
   <Style x:Key="Segment" TargetType="RadioButton">
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
     <Setter Property="Cursor" Value="Hand"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="RadioButton">
@@ -106,14 +126,14 @@ public static class Theme
   <Style x:Key="Switch" TargetType="CheckBox">
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
     <Setter Property="Cursor" Value="Hand"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="CheckBox">
           <StackPanel Orientation="Horizontal" Background="Transparent">
             <ContentPresenter VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <Border x:Name="track" Width="36" Height="20" CornerRadius="10" Background="{StaticResource Ctl}" BorderBrush="{StaticResource Line}" BorderThickness="1">
-              <Ellipse x:Name="knob" Width="14" Height="14" Fill="{StaticResource Dim}" HorizontalAlignment="Left" Margin="2,0"/>
+            <Border x:Name="track" Width="44" Height="24" CornerRadius="12" Background="{StaticResource Ctl}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+              <Ellipse x:Name="knob" Width="18" Height="18" Fill="{StaticResource Dim}" HorizontalAlignment="Left" Margin="2,0"/>
             </Border>
           </StackPanel>
           <ControlTemplate.Triggers>
@@ -130,7 +150,7 @@ public static class Theme
 
   <Style TargetType="CheckBox">
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="CheckBox">
@@ -213,7 +233,7 @@ public static class Theme
   </ControlTemplate>
   <Style TargetType="Slider">
     <Setter Property="Template" Value="{StaticResource HSlider}"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Style.Triggers>
       <Trigger Property="Orientation" Value="Vertical"><Setter Property="Template" Value="{StaticResource VSlider}"/></Trigger>
     </Style.Triggers>
@@ -232,7 +252,7 @@ public static class Theme
   <Style TargetType="ComboBox">
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
     <Setter Property="MinHeight" Value="26"/>
-    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
     <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
     <Setter Property="Template">
       <Setter.Value>
@@ -250,7 +270,7 @@ public static class Theme
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>

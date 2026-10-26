@@ -91,6 +91,29 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
    removed" and the bulb stays in the list.
 7. Android 13+: on a fresh install, the app asks for notifications once. Deny it: schedules still run.
 
+## I. 0.1.6: effects, sun schedules, fades, design fixes
+1. Effects on a full-color bulb: ⋯ → Effects → Candlelight. Expect the bulb to flicker on its own and the amber
+   "Now playing" bar. Close Lanternly: the built-in show keeps running. Reopen, tap Stop: the bulb goes back to a
+   steady color. Repeat with Rainbow and with Power Up / Splash / Cyber (these three are newer ids; report whether
+   your bulbs run them). Note which bulb models do nothing.
+2. Room and All bulbs effects: start Aurora on a room; white-only bulbs in it are skipped and the menu says
+   "(n of m bulbs)".
+3. App-side Color cycle on a room of 3+ bulbs for 2 minutes: colors change about every 1.5 s, other controls stay
+   responsive, Stop ends it at once. Switching homes or closing the app also stops it.
+4. Settings → Sunrise / sunset location: enter rounded coordinates (1 decimal place). The status line shows today's
+   times; compare with a sun table for your area (within 2 minutes is expected).
+5. Add a schedule "Sunset −0 min → Turn on" and one "Sunrise +5 → Effect: Aurora". Check they fire on time.
+6. Wake-up: a schedule a few minutes ahead with "Fade in over 5 min". The bulb turns on at 1 % and brightens to
+   100 % over 5 minutes (Android shows "Running a schedule" for that long). Then "Fade out over 5 min".
+7. Import a key file where two bulbs share a MeshId: it imports with a warning; Reset on either is refused.
+   A bulb with MeshId 0 shows "ADDRESS UNKNOWN" and its controls are disabled.
+8. Reset a bulb whose key-file entry has no Mac: no 10 s scan; the dialog explains it can't be confirmed.
+   During any reset scan (Android), the other bulbs' switches still work.
+9. Accessibility: with TalkBack / Narrator, swatches read "Set <bulb> to Red" (and "Selected"), switches read
+   "Power: <name>", sliders read "Brightness: <name>". Windows: Tab shows a blue focus ring on every button.
+10. With no key backup exported, the amber "Backup needed" banner shows on the main and settings pages; Export now
+    exports and the banner goes away.
+
 ## H. Reset bulb fixes (0.1.5)
 1. Give the bulb its own schedule (target: that bulb) plus one room schedule. Reset it as in F. Expect "Checking that
    … restarted (10 s)…", then the "Reset confirmed" dialog. The bulb's own schedule is gone from the list; the room
@@ -100,7 +123,7 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
    tapping Erase pairing). Expect "Couldn't confirm the reset" with **Keep** / **Remove anyway** (Windows: Yes = Keep,
    No = Remove anyway). Keep must leave the bulb and its schedules; Remove anyway removes both.
 4. Edit a key-file copy so one bulb has `"MeshId": 65535`, import it: expect "Could not import: … invalid mesh
-   address". Restore the good key file afterwards.
+   address". Restore the good key file afterwards. (0.1.6: two bulbs on the same address import with a warning.)
 5. Note how long the bulb took to show up as `telink_mesh1` after the reset (if it took more than 10 s, report it).
 
 ## G. 0.1.4 schedule fixes

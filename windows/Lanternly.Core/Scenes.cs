@@ -19,7 +19,7 @@ public static class Scenes
     {
         Cmd.Brightness => c.HasFlag(Caps.Dim),
         Cmd.Temp => c.HasFlag(Caps.Temp),
-        Cmd.Rgb => c.HasFlag(Caps.Color),
+        Cmd.Rgb or Cmd.Effect => c.HasFlag(Caps.Color),
         _ => true,
     });
 

@@ -1,5 +1,6 @@
 package io.github.arkivx0.lanternly
 
+import io.github.arkivx0.lanternly.core.SunLocation
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -124,6 +125,11 @@ class Store(ctx: Context) {
         Schedules.lowestFreeSlot(used).also { prefs.edit().putInt(k, it).commit() }
     }
     fun releaseSlot(id: Long) = synchronized(LOCK) { prefs.edit().remove("slot.$id").remove("fired.$id").commit() }
+
+    /** Optional coordinates for sunrise/sunset schedules, typed by the user in settings (no location permission). */
+    var sunLocation: SunLocation?
+        get() = if (!prefs.contains("sunLat")) null else SunLocation(prefs.getFloat("sunLat", 0f).toDouble(), prefs.getFloat("sunLon", 0f).toDouble()).takeIf { SunLocation.valid(it.lat, it.lon) }
+        set(v) { prefs.edit().apply { if (v == null) { remove("sunLat"); remove("sunLon") } else { putFloat("sunLat", v.lat.toFloat()); putFloat("sunLon", v.lon.toFloat()) } }.commit() }
 
     companion object { private val LOCK = Any() }
 

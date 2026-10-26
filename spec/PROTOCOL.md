@@ -33,3 +33,31 @@ Protected: `{"format":"lanternly-keyfile","version":1,"kdf":"pbkdf2-sha256","ite
 "nonce":b64(12),"ciphertext":b64(ct || tag16)}`; key = PBKDF2-HMAC-SHA256(passphrase, salt, iterations, 32 bytes);
 AES-256-GCM with AAD `lanternly-keyfile`. Readers accept 100k..10M iterations. Vector: `keyfile_vector.json`.
 
+
+
+## Light shows (light run mode), 0.1.6
+
+Same vendor command envelope as color (opcode `0xE2`, vendor `0x0211`), data `07 <mode> <show> <rnd>`:
+
+| mode | meaning |
+|---|---|
+| 0 | static (stops a show; show byte 0) |
+| 1 | light show |
+| 2 | music show (needs the phone microphone in the Cync app; not used) |
+| 3 | reveal |
+| 4 | multi-color |
+
+On the wire a show is `E2 11 02 07 01 <id> <rnd>`; `<rnd>` is one random byte, which the official app sends with
+every run-mode command. Light show ids (official app `LightRunMode.LightShow`): 1 Candlelight, 2 Rainbow,
+3 Fireworks, 4 Volcanic, 5 Aurora, 6 Happy Holidays, 7 Red White & Blue, 8 Vegas, 9 Party Time, 65 Power Up,
+66 Splash, 67 Cyber; 10–32 are user-made custom shows. The status byte reports 224/225/227 for Power Up/Splash/Cyber.
+cync-lan independently sends `E2 … 11 02 07 01 <id> <byte>` with the same ids, except Fireworks (it uses 0x3A;
+Lanternly follows the app's 3). The app offers shows only on full-color bulbs (Capability LightShow).
+
+Not native (done by Lanternly with timed commands): color cycle, candle flicker, breathe, and fades over minutes.
+
+## Sun times
+
+Sunrise/sunset use the NOAA solar calculator equations (Meeus), zenith 90.833°, computed for the local date and
+converted with the device time zone (so DST is handled by the zone rules). Tested against astral 3 for several
+latitudes (within 2 min), polar day/night and both 2026 US DST changes.

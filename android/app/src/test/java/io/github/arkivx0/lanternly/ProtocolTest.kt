@@ -113,13 +113,19 @@ class ProtocolTest {
         assertFalse(BulbReset.confirmed(Bulb("x", 2, 6, ""), listOf("")))
     }
 
-    /** Key-file import rejects group/broadcast addresses and duplicates; 0 (unknown) is allowed. */
+    /** Key-file import rejects group/broadcast addresses; duplicates import with a warning; 0 (unknown) is allowed. */
     @Test fun importValidatesAddresses() {
         fun file(vararg ids: Int, room: Int = 2) = Vault(listOf(Home(1, "H", "n", "p", listOf(Room(1, "R", listOf(room))),
             ids.mapIndexed { i, m -> Bulb("B$i", m, 6, "AA:BB:CC:DD:EE:0$i") }.toMutableList()))).toJson()
         assertEquals(2, KeyFile.import(file(2, 3), null).homes[0].bulbs.size)
         assertEquals(2, KeyFile.import(file(0, 0), null).homes[0].bulbs.size)
-        for (bad in listOf(file(2, 0xFFFF), file(2, 0x8000), file(2, -1), file(2, 2), file(2, 3, room = 0xFFFF)))
+        val dup = KeyFile.import(file(2, 2), null)
+        assertEquals(2, dup.homes[0].bulbs.size)
+        assertTrue(BulbReset.addressWarnings(dup).any { "share mesh address 2" in it })
+        assertNotNull(BulbReset.refuseReason(dup.homes[0], dup.homes[0].bulbs[0]))
+        assertTrue(BulbReset.addressWarnings(KeyFile.import(file(0, 3), null)).any { "address unknown" in it })
+        assertTrue(BulbReset.addressWarnings(KeyFile.import(file(2, 3), null)).isEmpty())
+        for (bad in listOf(file(2, 0xFFFF), file(2, 0x8000), file(2, -1), file(2, 3, room = 0xFFFF)))
             assertThrows(IllegalArgumentException::class.java) { KeyFile.import(bad, null) }
         assertThrows(IllegalArgumentException::class.java) { KeyFile.import(KeyFile.export(Vault.fromJson(file(5, 0xFFFF)), "pw"), "pw") }
     }

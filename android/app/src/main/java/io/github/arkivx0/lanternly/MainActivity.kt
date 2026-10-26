@@ -25,13 +25,12 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
     companion object {
-        const val BG = 0xFF1A1B26.toInt(); const val CARD = 0xFF24283B.toInt(); const val CTL = 0xFF2F3549.toInt()
-        const val FG = 0xFFC0CAF5.toInt(); const val DIM = 0xFF7982A9.toInt(); const val ACCENT = 0xFF7AA2F7.toInt()
-        const val GREEN = 0xFF9ECE6A.toInt(); const val YELLOW = 0xFFE0AF68.toInt()
+        const val BG = Tokens.BG; const val CARD = Tokens.CARD; const val CTL = Tokens.CTL
+        const val FG = Tokens.FG; const val DIM = Tokens.DIM; const val ACCENT = Tokens.ACCENT
+        const val GREEN = Tokens.OK; const val YELLOW = Tokens.WARN
         const val REQ_IMPORT = 1; const val REQ_EXPORT = 2; const val REQ_PERMS = 3
         /** Token for blink timers, so onStop removes only those and never other queued UI work. */
         private val BLINK_TIMERS = Any()
-        val SWATCHES = intArrayOf(0xFFF7768E.toInt(), 0xFFFF9E64.toInt(), 0xFFE0AF68.toInt(), 0xFF9ECE6A.toInt(), 0xFF73DACA.toInt(), 0xFF7AA2F7.toInt(), 0xFFBB9AF7.toInt())
     }
 
     private lateinit var store: Store
@@ -47,12 +46,24 @@ class MainActivity : Activity() {
     private var ble: BleSession? = null
     private var exportPass: String? = null
     private lateinit var status: TextView
+    private lateinit var nowBar: LinearLayout
+    private lateinit var nowText: TextView
+    /** What the Now playing bar stops: the home and bulbs of the running effect. */
+    private var nowTarget: Pair<Home, List<Bulb>>? = null
+    /** Swatch last applied per bulb from this app (bulb status reports only carry a coarse color), for the ✓. */
+    private val activeSwatch = HashMap<Bulb, String>()
     private lateinit var body: LinearLayout
     private var settingsOpen = false
     private var schedulesOpen = false
     private var schedules: List<Schedule> = emptyList()
     private val refreshers = ArrayList<() -> Unit>()
     private var demo = false
+    /** Token for app-side effect steps, so stopping removes only those. */
+    private val EFFECT_TIMERS = Any()
+    /** Generation of the running app-side effect; bumping it stops the loop. */
+    private var effectGen = 0
+    private var effectLabel: String? = null
+    private var vaultWarnings: List<String> = emptyList()
 
     private val home: Home? get() = vault.homes.getOrNull(store.homeIndex.coerceIn(0, maxOf(0, vault.homes.size - 1)))
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -62,6 +73,7 @@ class MainActivity : Activity() {
         store = Store(this)
         demo = intent?.getBooleanExtra("demo", false) == true
         vault = if (demo) demoVault() else store.load()
+        vaultWarnings = BulbReset.addressWarnings(vault) // shown in settings; nothing is changed
         schedules = if (demo) emptyList() else store.loadSchedules() // never throws: bad entries skipped, unreadable file quarantined
         if (!demo) Thread { try { Alarms.planAll(applicationContext, schedules) } catch (e: Throwable) { Diag.log("plan schedules", e) } }.start() // must never crash launch
         Diag.sink = { where, e -> android.util.Log.w("Lanternly", where + (e?.let { ": " + it.javaClass.simpleName } ?: "")) }
@@ -70,12 +82,20 @@ class MainActivity : Activity() {
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(12), dp(12), dp(6)) }
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titles.addView(text("Lanternly", 20f, FG, bold = true))
-        status = text("", 12f, DIM); titles.addView(status)
+        status = text("", 13f, DIM).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }; titles.addView(status)
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         top.addView(button("⏰") { schedulesOpen = !schedulesOpen; settingsOpen = false; render() }.apply { contentDescription = "Schedules"; (layoutParams as? ViewGroup.MarginLayoutParams)?.rightMargin = dp(6) })
         top.addView(button("⚙") { settingsOpen = !settingsOpen; schedulesOpen = false; render() }.apply { contentDescription = "Settings" })
-        top.addView(button("✕") { finishAndRemoveTask() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
+        top.addView(button("✕") { finishAndRemoveTask() }.apply { contentDescription = "Quit Lanternly"; (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
         root.addView(top)
+        // Now playing / Stop: visible whenever an effect is running, so Stop is always one tap away.
+        nowBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Tokens.WARN); setPadding(dp(16), dp(4), dp(8), dp(4)); visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        nowText = text("", 14f, Tokens.ON_WARN, bold = true)
+        nowBar.addView(nowText, LinearLayout.LayoutParams(0, -2, 1f))
+        nowBar.addView(Button(this).apply { text = "■ Stop"; isAllCaps = false; setTextColor(Tokens.WARN); background = round(Tokens.ON_WARN, 8); minHeight = dp(48); minimumHeight = dp(48)
+            contentDescription = "Stop effect"; setOnClickListener { nowTarget?.let { (h, l) -> stopEffects(h, l) } ?: stopAppEffect() } })
+        root.addView(nowBar, LinearLayout.LayoutParams(-1, -2))
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), dp(16)) }
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -88,7 +108,7 @@ class MainActivity : Activity() {
         if (!demo) ensurePermsThenConnect() else { router = Router(listOf(DemoLink())); setStatus("Demo · sample data") ; vault.homes.flatMap { it.bulbs }.forEach { it.via = Via.BLE }; render() }
     }
 
-    override fun onStop() { super.onStop(); stopAllBlinks() }
+    override fun onStop() { super.onStop(); stopAllBlinks(); stopAppEffect() }
 
     override fun onResume() { super.onResume(); if (schedulesOpen) render() } // exact-alarm permission may have changed
 
@@ -160,8 +180,7 @@ class MainActivity : Activity() {
         val p = ArrayList<String>()
         if (store.ble) p += if (ble?.loggedIn == true) "BLE ✓" else "BLE –"
         var s = if (p.isEmpty()) "Bluetooth is off" else p.joinToString(" · ") + " · offline only"
-        if (store.quarantined != null) s = "⚠ Stored keys unreadable, saving blocked · $s"
-        else if (!store.backedUp && !demo) s = "⚠ Export a key file backup (⚙) · $s"
+        // Key warnings live in the banner (keyBanner), not in this transient line.
         setStatus(s)
     }
     private fun setStatus(s: String) { status.text = s }
@@ -175,9 +194,9 @@ class MainActivity : Activity() {
             var err: String? = null; var ok = 0
             for (b in bulbs) try {
                 router.send(h, b, c)
-                if (c is Cmd.Identify || c is Cmd.FactoryReset) { ok++; continue } // no on/brightness/color change
+                if (c is Cmd.Identify || c is Cmd.FactoryReset || c is Cmd.Effect) { ok++; continue } // no on/brightness/color change
                 val st = b.state ?: BulbState(b.meshId, true, false, 50, 50, Triple(0, 0, 0))
-                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify, Cmd.FactoryReset -> st }
+                b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify, Cmd.FactoryReset, is Cmd.Effect -> st }
                 ok++
             } catch (e: Exception) { if (err == null) err = "${b.name}: ${e.message}"; Diag.log("send", e) }
             val r = BatchResult(ok, bulbs.size, err)
@@ -188,6 +207,60 @@ class MainActivity : Activity() {
         if (cmdIo.isShutdown) return
         try { cmdIo.execute { val r = Scenes.apply(router, h, s); if (!closing) post { setStatus(r.toString()); refresh() } } } catch (e: RejectedExecutionException) { Diag.log("scene after close", e) }
     }
+
+    // ---------- light shows ----------
+    /** Effects picker for one bulb, a room or all bulbs. Native shows run in the bulb; app-side ones need Lanternly open. */
+    private fun effectsPicker(h: Home, title: String, bulbs: List<Bulb>) {
+        val ok = bulbs.filter { it.addressKnown }
+        val color = ok.filter { Effects.supports(it) }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items += "■ Stop effect" to { stopEffects(h, ok) }
+        val part = if (color.size < ok.size) " (${color.size} of ${ok.size} bulbs)" else ""
+        if (color.isNotEmpty()) Effects.NATIVE.forEach { e -> items += "✨ ${e.name} · runs in the bulb$part" to { stopAppEffect(); send(h, color, Cmd.Effect(e.id), done = { r ->
+            if (r.ok > 0) showNowPlaying("✨ ${e.name} · $title (in the bulb)", h, color)
+            setStatus(if (r.allOk) "${e.name} on $title" else r.toString()) }) } }
+        else items += "✨ Built-in effects need a full-color bulb" to { }
+        AppEffects.ALL.forEach { n -> items += "↻ $n · needs Lanternly open" to { startAppEffect(h, title, ok, n) } }
+        AlertDialog.Builder(this).setTitle("Effects · $title")
+            .setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
+            .setNegativeButton("Close", null).show()
+    }
+
+    private fun stopEffects(h: Home, bulbs: List<Bulb>) {
+        stopAppEffect()
+        hideNowPlaying()
+        send(h, bulbs.filter { Effects.supports(it) }, Cmd.Effect(0), done = { r -> setStatus(if (r.allOk) "Effects stopped" else r.toString()) })
+    }
+
+    private fun showNowPlaying(label: String, h: Home, bulbs: List<Bulb>) {
+        nowTarget = h to bulbs; nowText.text = "Now playing: $label"; nowBar.visibility = View.VISIBLE
+    }
+    private fun hideNowPlaying() { nowTarget = null; nowBar.visibility = View.GONE }
+
+    /** App-side effect: one step at a time through the bulb-command queue, at most [AppEffects.MAX_CMDS_PER_SEC] commands/s. */
+    private fun startAppEffect(h: Home, title: String, bulbs: List<Bulb>, name: String) {
+        stopAppEffect()
+        val targets = bulbs.filter { (!AppEffects.needsColor(name) || it.has(Caps.COLOR)) && (name != "Breathe" || it.has(Caps.DIM)) }
+        if (targets.isEmpty()) { setStatus("$name: no suitable bulb here"); return }
+        if (targets.any { Effects.supports(it) }) send(h, targets.filter { Effects.supports(it) }, Cmd.Effect(0), quiet = true) // end a built-in show first
+        val gen = ++effectGen; effectLabel = "$name on $title"
+        val rnd = kotlin.random.Random(System.nanoTime())
+        val cmds = if (name == "Candle flicker") 2 else 1
+        val wait = AppEffects.stepMs(name, targets.size * cmds)
+        var i = 0
+        lateinit var tick: Runnable
+        tick = Runnable {
+            if (gen != effectGen || closing) return@Runnable
+            val step = AppEffects.step(name, i++, rnd); val extra = AppEffects.extra(name, rnd)
+            // queue only when the previous step went out, so a slow link never builds a backlog
+            send(h, targets, step, quiet = true, done = { if (extra != null) send(h, targets.filter { it.has(Caps.DIM) }, extra, quiet = true)
+                if (gen == effectGen) ui.postAtTime(tick, EFFECT_TIMERS, SystemClock.uptimeMillis() + wait) })
+        }
+        ui.post(tick)
+        showNowPlaying("↻ $name · $title (keep Lanternly open)", h, targets)
+    }
+
+    private fun stopAppEffect() { effectGen++; ui.removeCallbacksAndMessages(EFFECT_TIMERS); if (effectLabel != null) { effectLabel = null; if (::nowBar.isInitialized) hideNowPlaying() } }
 
     // ---------- find this bulb ----------
     private fun toggleBlink(h: Home, b: Bulb) {
@@ -232,15 +305,19 @@ class MainActivity : Activity() {
             val err = try { BulbReset.send(router, h, b); null } catch (e: Exception) { Diag.log("reset bulb", e); "${b.name}: reset not sent (${e.message}). Nothing was removed." }
             if (closing) return@execute
             if (err != null) { post { setStatus(err); refresh() }; return@execute }
-            post { setStatus("Reset sent. Checking that ${b.name} restarted (${BulbReset.CONFIRM_SCAN_MS / 1000} s)…") }
-            val seen = try { BulbReset.confirmed(b, AndroidGatt.findResetBulbs(this, BulbReset.CONFIRM_SCAN_MS)) } catch (e: Exception) { Diag.log("reset confirm scan", e); false }
-            if (closing) return@execute
-            post { // list changes only on the UI thread (render/refreshers iterate h.bulbs)
-                if (seen) { finishReset(h, b); showResetDone() }
-                else AlertDialog.Builder(this).setTitle(BulbReset.UNCONFIRMED_TITLE).setMessage(BulbReset.unconfirmedText(b)).setCancelable(false)
-                    .setPositiveButton("Keep") { _, _ -> setStatus("${b.name} was kept. Nothing was removed."); refresh() }
-                    .setNegativeButton("Remove anyway") { _, _ -> finishReset(h, b); setStatus("${b.name} was removed.") }.show()
-            }
+            // The confirmation scan runs on its own thread, never on the bulb-command queue, so other controls and stops keep working.
+            Thread {
+                val canSee = BulbReset.canConfirm(b)
+                if (canSee) post { setStatus("Reset sent. Checking that ${b.name} restarted (${BulbReset.CONFIRM_SCAN_MS / 1000} s)…") }
+                val seen = canSee && try { BulbReset.confirmed(b, AndroidGatt.findResetBulbs(this, BulbReset.CONFIRM_SCAN_MS)) } catch (e: Exception) { Diag.log("reset confirm scan", e); false }
+                if (closing) return@Thread
+                post { // list changes only on the UI thread (render/refreshers iterate h.bulbs)
+                    if (seen) { finishReset(h, b); showResetDone() }
+                    else AlertDialog.Builder(this).setTitle(BulbReset.UNCONFIRMED_TITLE).setMessage(BulbReset.unconfirmedText(b)).setCancelable(false)
+                        .setPositiveButton("Keep") { _, _ -> setStatus("${b.name} was kept. Nothing was removed. Reconnecting…"); connect() } // its link may have dropped
+                        .setNegativeButton("Remove anyway") { _, _ -> finishReset(h, b); setStatus("${b.name} was removed.") }.show()
+                }
+            }.start()
         } } catch (e: RejectedExecutionException) { Diag.log("reset after close", e) }
     }
 
@@ -249,14 +326,25 @@ class MainActivity : Activity() {
         val gone = BulbReset.schedulesFor(h, b, schedules)
         BulbReset.forget(h, b)
         save()
-        if (gone.isNotEmpty()) {
-            val ids = gone.map { it.id }.toSet(); val l = schedules.filter { it.id !in ids }; schedules = l
-            io.execute {
-                try { store.saveSchedules(l) } catch (e: Exception) { Diag.log("schedules save", e); post { setStatus("Schedules not saved: ${e.message}") } }
-                gone.forEach { Alarms.remove(applicationContext, it.id) }
-            }
-        }
         render(); connect() // the reset bulb may have been our connection
+        if (gone.isNotEmpty()) chooseSchedulesToDelete(h, b, gone)
+    }
+
+    /** After a reset: pick which of the bulb's own schedules to delete (all ticked). Kept ones show "(removed bulb)". */
+    private fun chooseSchedulesToDelete(h: Home, b: Bulb, gone: List<Schedule>) {
+        val pick = BooleanArray(gone.size) { true }
+        AlertDialog.Builder(this).setTitle("Delete ${b.name}'s schedules?")
+            .setMultiChoiceItems(gone.map { Schedules.describe(h, it) }.toTypedArray(), pick) { _, i, v -> pick[i] = v }
+            .setCancelable(false)
+            .setPositiveButton("Delete ticked") { _, _ ->
+                val del = gone.filterIndexed { i, _ -> pick[i] }; if (del.isEmpty()) return@setPositiveButton
+                val ids = del.map { it.id }.toSet(); val l = schedules.filter { it.id !in ids }; schedules = l
+                io.execute {
+                    try { store.saveSchedules(l) } catch (e: Exception) { Diag.log("schedules save", e); post { setStatus("Schedules not saved: ${e.message}") } }
+                    del.forEach { Alarms.remove(applicationContext, it.id) }
+                }
+                if (schedulesOpen) render()
+            }.setNegativeButton("Keep all", null).show()
     }
 
     private fun showResetDone() {
@@ -281,7 +369,24 @@ class MainActivity : Activity() {
         body.addView(button("Open settings", accent = true) { settingsOpen = true; render() }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(16) })
     }
 
+    /** High-contrast banner for the key warnings (unreadable keys, no backup), with the fix one tap away. */
+    private fun keyBanner() {
+        val msg = when {
+            store.quarantined != null && !demo -> "Stored keys unreadable, saving is blocked. Import a key file (⚙) to fix it."
+            !store.backedUp && !demo && vault.homes.isNotEmpty() -> "Your bulbs only answer to the mesh key on this phone. If it's lost, every bulb must be factory reset. Export a key file now."
+            else -> return
+        }
+        val b = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = round(Tokens.WARN, 10); setPadding(dp(14), dp(10), dp(14), dp(10)) }
+        b.addView(text("⚠ Backup needed", 16f, Tokens.ON_WARN, bold = true).apply { isAccessibilityHeading = true; if (store.quarantined != null) text = "⚠ Keys unreadable" })
+        b.addView(text(msg, 14f, Tokens.ON_WARN))
+        b.addView(Button(this).apply { text = if (store.quarantined != null) "Import key file" else "Export now"; isAllCaps = false; setTextColor(Tokens.WARN); background = round(Tokens.ON_WARN, 8)
+            minHeight = dp(48); minimumHeight = dp(48); setPadding(dp(16), 0, dp(16), 0)
+            setOnClickListener { if (store.quarantined != null) { settingsOpen = true; render() } else exportKeys() } }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+        body.addView(b, lp())
+    }
+
     private fun homeView(h: Home) {
+        keyBanner()
         if (vault.homes.size > 1) {
             val row = LinearLayout(this)
             vault.homes.forEachIndexed { i, x -> row.addView(chip(x.name, i == store.homeIndex) { stopAllBlinks(); store.homeIndex = i; render(); connect() }) }
@@ -289,6 +394,7 @@ class MainActivity : Activity() {
         }
         val sc = LinearLayout(this).apply { setPadding(0, dp(4), 0, dp(8)) }
         Scenes.all.forEach { s -> sc.addView(chip(s.name, false) { scene(h, s) }) }
+        sc.addView(chip("✨ Effects", false) { effectsPicker(h, "All bulbs", h.bulbs) }.apply { contentDescription = "Effects for all bulbs" })
         body.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(sc) })
         val assigned = HashSet<Bulb>()
         for (r in h.rooms) { val bs = h.bulbs.filter { it.meshId in r.meshIds }; if (bs.isEmpty()) continue; assigned += bs; group(h, r.name, bs) }
@@ -300,11 +406,13 @@ class MainActivity : Activity() {
     private fun group(h: Home, name: String, bulbs: List<Bulb>) {
         val card = card()
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(text(name, 16f, FG, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
-        val sw = switch(); sw.setOnClickListener { send(h, bulbs, Cmd.Power(sw.isChecked)) }
+        head.addView(text(name, 16f, FG, bold = true).apply { isAccessibilityHeading = true }, LinearLayout.LayoutParams(0, -2, 1f))
+        val known = bulbs.filter { it.addressKnown } // address 0 would reach whichever bulb is connected
+        head.addView(button("✨") { effectsPicker(h, name, bulbs) }.apply { contentDescription = "Effects: $name"; (layoutParams as? ViewGroup.MarginLayoutParams)?.rightMargin = dp(6) })
+        val sw = switch().apply { contentDescription = "Power: $name" }; sw.setOnClickListener { send(h, known, Cmd.Power(sw.isChecked)) }
         head.addView(sw); card.addView(head)
         refreshers += { sw.isChecked = bulbs.any { it.state?.on == true } }
-        if (bulbs.any { it.has(Caps.DIM) }) card.addView(seek(1, 100, 50) { v -> send(h, bulbs.filter { it.has(Caps.DIM) }, Cmd.Brightness(v)) })
+        if (bulbs.any { it.has(Caps.DIM) }) card.addView(seek(1, 100, 50, "Brightness: $name") { v -> send(h, known.filter { it.has(Caps.DIM) }, Cmd.Brightness(v)) })
         card.addView(View(this).apply { setBackgroundColor(CTL) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(4); bottomMargin = dp(4) })
         bulbs.forEach { bulbRow(card, h, it) }
         body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
@@ -313,28 +421,50 @@ class MainActivity : Activity() {
     private fun bulbRow(parent: LinearLayout, h: Home, b: Bulb) {
         val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, 0) }
         val dot = View(this); line.addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(8) })
-        line.addView(text(b.name, 14f, FG), LinearLayout.LayoutParams(0, -2, 1f))
+        line.addView(text(b.name, 14f, FG).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
         val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(dp(18), 0, 0, dp(4)) }
         val find = button("◎") { toggleBlink(h, b) }.apply { contentDescription = "Find this bulb" }
         line.addView(find)
         line.addView(button("⋯") { extra.visibility = if (extra.visibility == View.VISIBLE) View.GONE else View.VISIBLE }.apply { contentDescription = "More options: ${b.name}" })
-        val via = text("", 10f, DIM).apply { setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(CTL, 4) }
+        val via = text("", 11f, DIM, bold = true).apply { setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(CTL, 4) }
         line.addView(via, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6); rightMargin = dp(6) })
-        val sw = switch(); sw.setOnClickListener { send(h, listOf(b), Cmd.Power(sw.isChecked)) }
+        val sw = switch().apply { contentDescription = "Power: ${b.name}" }; sw.setOnClickListener { send(h, listOf(b), Cmd.Power(sw.isChecked)) }
         line.addView(sw); parent.addView(line)
+        if (!b.addressKnown) {
+            find.isEnabled = false; sw.isEnabled = false
+            parent.addView(note(if (b.meshId == 0) "Address unknown: this bulb's own controls are off (they would reach whichever bulb is connected). Reset it and add it again, or import a key file that has its address."
+                else "Invalid mesh address ${b.meshId}: this bulb's own controls are off."))
+            refreshers += { via.text = "ADDRESS UNKNOWN"; via.setTextColor(YELLOW); sw.isChecked = b.state?.on == true }
+            return
+        }
         var bri: SeekBar? = null
-        if (b.has(Caps.DIM)) { bri = seek(1, 100, b.state?.brightness ?: 50) { v -> send(h, listOf(b), Cmd.Brightness(v)) }; parent.addView(bri) }
+        if (b.has(Caps.DIM)) { bri = seek(1, 100, b.state?.brightness ?: 50, "Brightness: ${b.name}") { v -> send(h, listOf(b), Cmd.Brightness(v)) }; parent.addView(bri) }
         if (b.has(Caps.TEMP)) {
             val r = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-            r.addView(text("Warm", 11f, DIM)); r.addView(seek(0, 100, 50) { v -> send(h, listOf(b), Cmd.Temp(v)) }, LinearLayout.LayoutParams(0, -2, 1f)); r.addView(text("Cool", 11f, DIM))
+            r.addView(text("Warm", 13f, DIM)); r.addView(seek(0, 100, 50, "Color temperature: ${b.name}") { v -> activeSwatch.remove(b); send(h, listOf(b), Cmd.Temp(v)) }, LinearLayout.LayoutParams(0, -2, 1f)); r.addView(text("Cool", 13f, DIM))
             extra.addView(r)
         }
+        extra.addView(button("✨ Effects ›") { effectsPicker(h, b.name, listOf(b)) }.apply { contentDescription = "Effects: ${b.name}" })
         if (b.has(Caps.COLOR)) {
+            // 48dp touch targets around a 32dp circle, each named for TalkBack, ✓ on the color last set here.
             val r = LinearLayout(this).apply { setPadding(0, dp(4), 0, 0) }
-            SWATCHES.forEach { c -> r.addView(View(this).apply { background = round(c, 6); setOnClickListener { send(h, listOf(b), Cmd.Rgb(Color.red(c), Color.green(c), Color.blue(c))) } }, LinearLayout.LayoutParams(dp(30), dp(26)).apply { rightMargin = dp(6) }) }
-            extra.addView(r)
+            val marks = ArrayList<Pair<String, TextView>>()
+            Tokens.SWATCHES.forEach { (n, hex) ->
+                val c = 0xFF000000.toInt() or hex
+                val v = TextView(this).apply {
+                    gravity = Gravity.CENTER; textSize = 18f; setTextColor(Tokens.ON_ACCENT); setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    background = android.graphics.drawable.InsetDrawable(GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c) }, dp(8))
+                    contentDescription = "Set ${b.name} to $n"
+                    setOnClickListener { activeSwatch[b] = n; send(h, listOf(b), Cmd.Rgb(Color.red(c), Color.green(c), Color.blue(c))); refresh() }
+                }
+                marks += n to v
+                r.addView(v, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }
+            refreshers += { val a = activeSwatch[b]; marks.forEach { (n, v) -> v.text = if (n == a) "✓" else ""; if (Build.VERSION.SDK_INT >= 30) v.stateDescription = if (n == a) "Selected" else null } }
+            extra.addView(HorizontalScrollView(this).apply { addView(r) })
         }
-        extra.addView(button("Reset bulb…") { resetBulb(h, b) }.apply { contentDescription = "Reset bulb: ${b.name}" })
+        extra.addView(View(this).apply { setBackgroundColor(Tokens.LINE) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(8); bottomMargin = dp(8) })
+        extra.addView(button("⚠ Reset bulb…") { resetBulb(h, b) }.apply { setTextColor(Tokens.WARN) }.apply { contentDescription = "Reset bulb: ${b.name}" })
         parent.addView(extra)
         refreshers += {
             val s = b.state
@@ -344,12 +474,14 @@ class MainActivity : Activity() {
             sw.isChecked = s?.on == true
             if (s != null && bri != null && !bri.isPressed) bri.progress = maxOf(1, s.brightness) - 1
             via.text = when (b.via) { Via.BLE -> "BLE"; else -> "OUT OF RANGE" }
+            line.contentDescription = "${b.name}, " + (if (s?.on == true) "on, ${s.brightness}%" else "off") + if (b.via == Via.BLE) "" else ", out of range"
             via.setTextColor(when (b.via) { Via.BLE -> ACCENT; else -> DIM })
             dot.background = round(if (s?.on == true) (if (s.mode == 0xfe) Color.rgb(s.rgb.first, s.rgb.second, s.rgb.third) else YELLOW) else CTL, 5)
         }
     }
 
     private fun settings() {
+        keyBanner()
         val c1 = card()
         c1.addView(text("Connections", 16f, FG, bold = true))
         c1.addView(toggle("Bluetooth (direct to nearby bulbs)", store.ble) { store.ble = it; ensurePermsThenConnect() })
@@ -362,7 +494,28 @@ class MainActivity : Activity() {
         val r = LinearLayout(this)
         r.addView(button("Import key file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "*/*" }, REQ_IMPORT) })
         if (vault.homes.isNotEmpty()) r.addView(button("Export key file") { exportKeys() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
-        c2.addView(r); body.addView(c2, lp())
+        c2.addView(r)
+        vaultWarnings.forEach { c2.addView(note("⚠ $it")) }
+        body.addView(c2, lp())
+
+        val cl = card()
+        cl.addView(text("Sunrise / sunset location (optional)", 16f, FG, bold = true))
+        cl.addView(note("For sunrise and sunset schedules only. Type latitude and longitude in decimal degrees (north and east positive), e.g. from a paper map; a rounded value (1 decimal place, about 10 km) is enough. Lanternly computes sun times on this phone; it doesn't use location permission or the internet."))
+        val loc = store.sunLocation
+        val la = edit("Latitude, e.g. 40.7", InputType.TYPE_CLASS_TEXT).apply { setText(loc?.lat?.toString() ?: "") }
+        val lo = edit("Longitude, e.g. -74.0", InputType.TYPE_CLASS_TEXT).apply { setText(loc?.lon?.toString() ?: "") }
+        cl.addView(la); cl.addView(lo)
+        val lr = LinearLayout(this)
+        lr.addView(button("Save location") {
+            val v = SunLocation.parse(la.text.toString(), lo.text.toString())
+            if (v == null) { la.error = "Latitude -90..90, longitude -180..180"; return@button }
+            store.sunLocation = v; replanAll()
+            val today = java.time.LocalDate.now(); val z = java.time.ZoneId.systemDefault()
+            fun f(t: java.time.ZonedDateTime?) = t?.let { "%02d:%02d".format(it.hour, it.minute) } ?: "none"
+            setStatus("Location saved · today sunrise ${f(Sun.event(today, v, true, z))}, sunset ${f(Sun.event(today, v, false, z))}")
+        })
+        if (loc != null) lr.addView(button("Clear") { store.sunLocation = null; replanAll(); render() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
+        cl.addView(lr); body.addView(cl, lp())
 
         val ca = card()
         ca.addView(text("Add a reset bulb (experimental)", 16f, FG, bold = true))
@@ -379,7 +532,7 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.5 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.6 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
             AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
@@ -438,6 +591,8 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun replanAll() { if (!demo) { val l = schedules; io.execute { Alarms.planAll(applicationContext, l) } } }
+
     private fun schedulesView() {
         val c = card()
         c.addView(text("Schedules", 16f, FG, bold = true))
@@ -453,6 +608,7 @@ class MainActivity : Activity() {
             })
         }
         store.lastRun?.takeIf { !demo }?.let { c.addView(note("Last run: $it")) }
+        if (schedules.any { it.trigger != "time" } && store.sunLocation == null) c.addView(note("⚠ Sunrise/sunset schedules don't run until you enter a location in ⚙ settings."))
         if (schedules.isEmpty()) c.addView(note("No schedules yet."))
         for (s in schedules) {
             val h = vault.homes.firstOrNull { it.id == s.homeId }
@@ -478,25 +634,41 @@ class MainActivity : Activity() {
 
     private fun addSchedule(h: Home) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        box.addView(TextView(this).apply { text = "When" })
+        val trig = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("At a time", "Sunrise", "Sunset")); contentDescription = "When" }
+        box.addView(trig)
         val tp = TimePicker(this).apply { setIs24HourView(android.text.format.DateFormat.is24HourFormat(this@MainActivity)); hour = 7; minute = 0 }
         box.addView(tp)
-        val days = Schedules.DAY_NAMES.map { CheckBox(this).apply { text = it; isChecked = true } }
-        val dr = LinearLayout(this); days.forEach { dr.addView(it) }
-        box.addView(HorizontalScrollView(this).apply { addView(dr) })
+        val off = edit("Offset in minutes (e.g. -30 = 30 min before)", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED).apply { setText("0"); visibility = View.GONE }
+        box.addView(off)
+        val sunNote = TextView(this).apply { textSize = 12f; visibility = View.GONE
+            text = if (store.sunLocation == null) "No location set: enter latitude/longitude in ⚙ settings or this won't run." else "Uses the location in ⚙ settings." }
+        box.addView(sunNote)
+        trig.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { tp.visibility = if (pos == 0) View.VISIBLE else View.GONE; off.visibility = if (pos == 0) View.GONE else View.VISIBLE; sunNote.visibility = off.visibility }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        val days = Schedules.DAY_NAMES.map { CheckBox(this).apply { text = it; isChecked = true; minHeight = dp(48); minimumHeight = dp(48); minWidth = dp(64) } }
+        box.addView(TextView(this).apply { text = "Days" })
+        days.chunked(4).forEach { row -> val dr = LinearLayout(this); row.forEach { dr.addView(it) }; box.addView(dr) }
         box.addView(TextView(this).apply { text = "Action" })
-        val act = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, Schedules.ACTIONS.map { Schedules.actionText(it) }); contentDescription = "Action" }
+        val act = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, Schedules.ALL_ACTIONS.map { Schedules.actionText(it) }); contentDescription = "Action" }
         box.addView(act)
         box.addView(TextView(this).apply { text = "Bulbs" })
-        val targets = listOf("all" to "All bulbs") + h.rooms.map { "room:${it.id}" to "Room: ${it.name}" } + h.bulbs.map { "bulb:${it.meshId}" to it.name }
+        val targets = listOf("all" to "All bulbs") + h.rooms.map { "room:${it.id}" to "Room: ${it.name}" } + h.bulbs.filter { it.addressKnown }.map { "bulb:${it.meshId}" to it.name }
         val tgt = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, targets.map { it.second }); contentDescription = "Bulbs" }
         box.addView(tgt)
-        box.addView(TextView(this).apply { text = "The phone must be near the bulbs with Bluetooth on at that time. Scenes set color only on bulbs that support it."; textSize = 12f })
+        box.addView(TextView(this).apply { text = "The phone must be near the bulbs with Bluetooth on at that time. Scenes set color and effects run only on bulbs that support them. A fade starts at the set time and keeps the phone connected for its whole length."; textSize = 12f })
         val d = AlertDialog.Builder(this).setTitle("Add schedule").setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("Add", null).setNegativeButton("Cancel", null).show()
         d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             var mask = 0; days.forEachIndexed { i, cb -> if (cb.isChecked) mask = mask or (1 shl i) }
             if (mask == 0) { Toast.makeText(this, "Choose at least one day", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            val s = Schedule(System.currentTimeMillis(), true, tp.hour, tp.minute, mask, Schedules.ACTIONS[act.selectedItemPosition], h.id, targets[tgt.selectedItemPosition].first)
+            val trigger = Schedules.TRIGGERS[trig.selectedItemPosition]
+            val offset = if (trigger == "time") 0 else off.text.toString().trim().toIntOrNull() ?: Int.MIN_VALUE
+            if (offset !in -Schedules.MAX_OFFSET..Schedules.MAX_OFFSET) { off.error = "-${Schedules.MAX_OFFSET} to ${Schedules.MAX_OFFSET}"; return@setOnClickListener }
+            val s = Schedule(System.currentTimeMillis(), true, if (trigger == "time") tp.hour else 0, if (trigger == "time") tp.minute else 0, mask,
+                Schedules.ALL_ACTIONS[act.selectedItemPosition], h.id, targets[tgt.selectedItemPosition].first, trigger, offset)
             d.dismiss(); saveSchedules(schedules + s, changed = s); render()
         }
     }
@@ -538,7 +710,11 @@ class MainActivity : Activity() {
                         val v = KeyFile.import(text, pass)
                         require(v.homes.isNotEmpty()) { "no homes in file" }
                         vault = Vault(v.homes); store.unblock(); store.backedUp = true
-                        if (save()) post { settingsOpen = false; render(); connect() }
+                        val warn = BulbReset.addressWarnings(vault); vaultWarnings = warn
+                        if (save()) post {
+                            settingsOpen = false; render(); connect()
+                            if (warn.isNotEmpty()) AlertDialog.Builder(this).setTitle("Imported, with warnings").setMessage(warn.joinToString("\n\n")).setPositiveButton("OK", null).show()
+                        }
                     } catch (e: Exception) { fail(e) }
                 }
                 if (KeyFile.isProtected(text)) askPassphrase { doImport(it) } else doImport(null)
@@ -549,7 +725,7 @@ class MainActivity : Activity() {
                         val out = KeyFile.export(vault, pass)
                         contentResolver.openOutputStream(uri)!!.use { it.write(out.toByteArray()) }
                         store.backedUp = true
-                        post { Toast.makeText(this, if (pass != null) "Exported (passphrase-protected)" else "Exported", Toast.LENGTH_SHORT).show(); updateStatus() }
+                        post { Toast.makeText(this, if (pass != null) "Exported (passphrase-protected)" else "Exported", Toast.LENGTH_SHORT).show(); updateStatus(); render() }
                     } catch (e: Exception) { fail(e) }
                 }
             }
@@ -561,31 +737,33 @@ class MainActivity : Activity() {
     private fun round(c: Int, r: Int) = GradientDrawable().apply { setColor(c); cornerRadius = dp(r).toFloat() }
     private fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = round(CARD, 10); setPadding(dp(14), dp(10), dp(14), dp(10)) }
     private fun text(s: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply { text = s; textSize = size; setTextColor(color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD) }
-    private fun note(s: String) = text(s, 12f, DIM).apply { setPadding(0, dp(2), 0, dp(6)) }
+    private fun note(s: String) = text(s, 13f, DIM).apply { setPadding(0, dp(2), 0, dp(6)) }
     private fun button(s: String, accent: Boolean = false, f: () -> Unit) = Button(this).apply {
         text = s; isAllCaps = false; setTextColor(if (accent) BG else FG); background = round(if (accent) ACCENT else CTL, 8)
         minHeight = dp(48); minimumHeight = dp(48); minWidth = dp(48); minimumWidth = dp(48); setPadding(dp(12), 0, dp(12), 0); setOnClickListener { f() }
-        layoutParams = LinearLayout.LayoutParams(-2, dp(48))
+        layoutParams = LinearLayout.LayoutParams(-2, -2) // wrap (min 48dp) so labels don't clip at large font scales
     }
     private fun chip(s: String, selected: Boolean, f: () -> Unit) = TextView(this).apply {
         text = s; textSize = 13f; setTextColor(if (selected) BG else FG); background = round(if (selected) ACCENT else CTL, 16)
         setPadding(dp(14), dp(7), dp(14), dp(7)); setOnClickListener { f() }
+        gravity = Gravity.CENTER_VERTICAL; minHeight = dp(48); minimumHeight = dp(48) // 48dp touch target
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) }
     }
     private fun switch() = Switch(this).apply {
+        minHeight = dp(48); minimumHeight = dp(48); minWidth = dp(48); minimumWidth = dp(48)
         thumbTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(ACCENT, DIM))
         trackTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(0x887AA2F7.toInt(), CTL))
     }
     private fun toggle(s: String, v: Boolean, f: (Boolean) -> Unit) = switch().apply { text = s; setTextColor(FG); isChecked = v; setPadding(0, dp(6), 0, dp(6)); setOnCheckedChangeListener { _, c -> f(c) } }
     private fun edit(hint: String, type: Int) = EditText(this).apply { this.hint = hint; inputType = type; setTextColor(FG); setHintTextColor(DIM); background = round(CTL, 6); setPadding(dp(10), dp(8), dp(10), dp(8)); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) } }
     /** Sends while dragging at most ~6/s and always on release. */
-    private fun seek(min: Int, max: Int, v: Int, f: (Int) -> Unit) = SeekBar(this).apply {
-        this.max = max - min; progress = v - min
+    private fun seek(min: Int, max: Int, v: Int, label: String, f: (Int) -> Unit) = SeekBar(this).apply {
+        this.max = max - min; progress = v - min; contentDescription = label; minimumHeight = dp(48)
         progressTintList = android.content.res.ColorStateList.valueOf(ACCENT); thumbTintList = progressTintList
         progressBackgroundTintList = android.content.res.ColorStateList.valueOf(CTL)
         var last = 0L
         setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar, p: Int, user: Boolean) { if (user && System.currentTimeMillis() - last > 160) { last = System.currentTimeMillis(); f(p + min) } }
+            override fun onProgressChanged(s: SeekBar, p: Int, user: Boolean) { if (Build.VERSION.SDK_INT >= 30) stateDescription = "${p + min} percent"; if (user && System.currentTimeMillis() - last > 160) { last = System.currentTimeMillis(); f(p + min) } }
             override fun onStartTrackingTouch(s: SeekBar) {}
             override fun onStopTrackingTouch(s: SeekBar) { f(s.progress + min) }
         })

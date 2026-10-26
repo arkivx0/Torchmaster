@@ -14,6 +14,10 @@ public sealed class Settings
     public Dictionary<long, long> LastFired { get; set; } = [];
     /// <summary>Result of the last schedule run, kept on the Schedules page.</summary>
     public string? LastRun { get; set; }
+    /// <summary>Optional coordinates for sunrise/sunset schedules, typed by the user (no location service).</summary>
+    public double? SunLat { get; set; }
+    public double? SunLon { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public SunLocation? Sun => SunLat is { } a && SunLon is { } b && SunLocation.Valid(a, b) ? new(a, b) : null;
 }
 
 /// <summary>

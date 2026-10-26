@@ -20,6 +20,8 @@ object Caps { const val ON_OFF = 1; const val DIM = 2; const val TEMP = 4; const
 class Bulb(var name: String, var meshId: Int, var type: Int, var mac: String) {
     val caps get() = Caps.forType(type)
     fun has(c: Int) = caps and c != 0
+    /** False for 0 (not learned yet: commands would reach whichever bulb is connected) and group/broadcast addresses. */
+    val addressKnown get() = meshId in 1..0x7FFF
     @Volatile var state: BulbState? = null
     @Volatile var via: Via = Via.NONE
 }

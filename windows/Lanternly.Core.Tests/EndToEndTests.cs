@@ -253,7 +253,7 @@ public class EndToEndTests
         Assert.False(BulbReset.Confirmed(new Bulb { Mac = "" }, [""]));
     }
 
-    [Fact] // key-file import rejects group/broadcast addresses and duplicates; 0 (unknown) is allowed
+    [Fact] // key-file import rejects group/broadcast addresses; duplicates import with a warning; 0 (unknown) is allowed
     public void ImportValidatesAddresses()
     {
         static string File(int room, params int[] ids) => new Vault { Homes = [new Home { Id = 1, Name = "H", MeshName = "n", MeshPassword = "p",
@@ -261,7 +261,13 @@ public class EndToEndTests
             Bulbs = ids.Select((m, i) => new Bulb { Name = $"B{i}", MeshId = (ushort)m, Type = 6, Mac = $"AA:BB:CC:DD:EE:0{i}" }).ToList() }] }.ToJson();
         Assert.Equal(2, KeyFile.Import(File(2, 2, 3), null).Homes[0].Bulbs.Count);
         Assert.Equal(2, KeyFile.Import(File(2, 0, 0), null).Homes[0].Bulbs.Count);
-        foreach (var bad in new[] { File(2, 2, 0xFFFF), File(2, 2, 0x8000), File(2, 2, 2), File(0xFFFF, 2, 3) })
+        var dup = KeyFile.Import(File(2, 2, 2), null);
+        Assert.Equal(2, dup.Homes[0].Bulbs.Count);
+        Assert.Contains(BulbReset.AddressWarnings(dup), w => w.Contains("share mesh address 2"));
+        Assert.NotNull(BulbReset.RefuseReason(dup.Homes[0], dup.Homes[0].Bulbs[0]));
+        Assert.Contains(BulbReset.AddressWarnings(KeyFile.Import(File(2, 0, 3), null)), w => w.Contains("address unknown"));
+        Assert.Empty(BulbReset.AddressWarnings(KeyFile.Import(File(2, 2, 3), null)));
+        foreach (var bad in new[] { File(2, 2, 0xFFFF), File(2, 2, 0x8000), File(0xFFFF, 2, 3) })
             Assert.Throws<InvalidDataException>(() => KeyFile.Import(bad, null));
         Assert.Throws<InvalidDataException>(() => KeyFile.Import(KeyFile.Export(Vault.FromJson(File(2, 5, 0xFFFF)), "pw"), "pw"));
     }
