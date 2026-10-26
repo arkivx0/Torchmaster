@@ -60,6 +60,17 @@ class SunTest {
         val sundays = s.copy(days = Schedules.dayBit(java.time.DayOfWeek.SUNDAY)) // 2026-06-21 is a Sunday
         assertEquals(28, Schedules.nextFire(sundays, ZonedDateTime.of(2026, 6, 21, 22, 0, 0, 0, c), c, loc)!!.dayOfMonth)
     }
+    /** Days apply to the day it actually runs, even when the offset moves it past midnight. */
+    @Test fun offsetAcrossMidnightUsesRunDay() {
+        val z = ZoneId.of("Atlantic/Reykjavik"); val loc = SunLocation(64.1466, -21.9426)
+        val sat = Schedule(1, true, 0, 0, Schedules.dayBit(java.time.DayOfWeek.SATURDAY), "on", 1, "all", "sunset", 180)
+        val t = Schedules.nextFire(sat, ZonedDateTime.of(2026, 7, 31, 12, 0, 0, 0, z), z, loc)!!
+        assertEquals(java.time.DayOfWeek.SATURDAY, t.dayOfWeek); assertEquals(1, t.dayOfMonth); assertTrue(t.hour in 1..2) // Friday's sunset + 3 h
+    }
+    @Test fun locationIsRoundedToOneDecimal() {
+        assertEquals(SunLocation(39.7, -105.0), SunLocation(39.74, -104.99).rounded())
+        assertEquals(SunLocation(-33.9, 151.2), SunLocation(-33.8688, 151.2093).rounded())
+    }
     @Test fun locationParsing() {
         assertEquals(SunLocation(39.74, -104.99), SunLocation.parse(" 39,74 ", "-104.99")) // Denver city centre
         assertNull(SunLocation.parse("91", "0")); assertNull(SunLocation.parse("0", "181")); assertNull(SunLocation.parse("x", "0"))

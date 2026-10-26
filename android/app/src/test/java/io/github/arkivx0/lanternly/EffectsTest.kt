@@ -77,6 +77,14 @@ class EffectsTest {
         Fades.run(Router(listOf(link)), h, h.bulbs, false, 10, deadlineMs = 60_000, now = { t }, sleep = { t += it })
         assertEquals(Cmd.Brightness(60), sent[0]); assertEquals(Cmd.Power(false), sent.last()); assertEquals(Cmd.Brightness(1), sent[sent.size - 2])
         assertTrue(t <= 60_000)
+        // fade out with no state yet: waits for the status report and starts from it
+        sent.clear(); t = 0; h.bulbs[0].state = null; var naps = 0
+        Fades.run(Router(listOf(link)), h, h.bulbs, false, 1, now = { t }, sleep = { t += it; if (++naps == 3) h.bulbs[0].state = BulbState(1, true, true, 35, 50, Triple(0, 0, 0)) })
+        assertEquals(Cmd.Brightness(35), sent[0])
+        // an interrupt during a send stops the fade at once (not swallowed)
+        val stuck = object : Link { override val kind = Via.BLE; override var onState: ((Home?, BulbState) -> Unit)? = null
+            override fun canReach(h: Home, b: Bulb) = true; override fun send(h: Home, b: Bulb, c: Cmd) { throw InterruptedException() } }
+        assertThrows(InterruptedException::class.java) { Fades.run(Router(listOf(stuck)), h, h.bulbs, true, 5, now = { t }, sleep = { t += it }) }
     }
 
     @Test fun scheduleRunsNativeEffectOnColorBulbsOnly() {

@@ -62,6 +62,9 @@ object BulbReset {
         for (h in v.homes) {
             h.bulbs.firstOrNull { it.meshId !in 0..MAX_ADDRESS }?.let { throw IllegalArgumentException("bulb \"${it.name}\" has invalid mesh address ${it.meshId}") }
             h.rooms.firstOrNull { r -> r.meshIds.any { it !in 0..MAX_ADDRESS } }?.let { throw IllegalArgumentException("room \"${it.name}\" has an invalid mesh address") }
+            // As in 0.1.5: two bulbs on one address can't be told apart (a command reaches both), so the file is refused.
+            h.bulbs.filter { it.meshId != 0 }.groupBy { it.meshId }.values.firstOrNull { it.size > 1 }?.let {
+                throw IllegalArgumentException("${it.joinToString(" and ") { b -> "\"${b.name}\"" }} share mesh address ${it[0].meshId}") }
         }
     }
 

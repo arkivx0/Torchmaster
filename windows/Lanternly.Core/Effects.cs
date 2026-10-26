@@ -82,13 +82,15 @@ public static class Fades
     }
     public static TimeSpan Duration(int minutes) => TimeSpan.FromMinutes(Math.Clamp(minutes, 1, MaxMinutes));
 
-    /// <summary>Fade in: on at 1 % then up to 100 %. Fade out: from the brightest known level (100 if unknown) to 1 %, then off.</summary>
+    /// <summary>Fade in: on at 1 % then up to 100 %. Fade out: from the brightest current level (reported after login; 100 if no report) to 1 %, then off.</summary>
     public static async Task<BatchResult> RunAsync(Router r, Home h, List<Bulb> bulbs, bool fadeIn, int minutes, CancellationToken ct = default,
-        Func<long>? now = null, Func<long, CancellationToken, Task>? delay = null)
+        Func<long>? now = null, Func<long, CancellationToken, Task>? delay = null, int settleMs = 2000)
     {
         now ??= () => Environment.TickCount64; delay ??= (ms, c) => Task.Delay(TimeSpan.FromMilliseconds(ms), c);
         var dim = bulbs.Where(b => b.Caps.HasFlag(Caps.Dim)).ToList();
-        int start = fadeIn ? 1 : Math.Clamp(bulbs.Where(b => b.State is { On: true }).Select(b => b.State!.Brightness).DefaultIfEmpty(100).Max(), 1, 100);
+        // Fade-out starts from the bulbs' current level: wait briefly for the status reports that arrive after login.
+        if (!fadeIn) for (int n = settleMs / 100; n > 0 && dim.Any(b => b.State == null); n--) try { await delay(100, ct); } catch (OperationCanceledException) { return new BatchResult(0, bulbs.Count, "cancelled"); }
+        int start = fadeIn ? 1 : Math.Clamp(dim.Where(b => b.State is { On: true }).Select(b => b.State!.Brightness).DefaultIfEmpty(100).Max(), 1, 100);
         var steps = Plan(start, fadeIn ? 100 : 1, minutes);
         var reached = new HashSet<Bulb>(); string? first = null;
         async Task Each(IEnumerable<Bulb> l, Cmd c, bool count)
@@ -104,7 +106,7 @@ public static class Fades
             if (k > 0)
             {
                 var wait = t0 + steps[k].AtMs - now();
-                if (wait > 0) try { await delay(wait, ct); } catch (OperationCanceledException) { await Each(dim, new Cmd.Brightness(steps[^1].Pct), false); break; }
+                if (wait > 0) try { await delay(wait, ct); } catch (OperationCanceledException) { return new BatchResult(reached.Count, bulbs.Count, "stopped part-way"); } // taken over or app closing: leave the bulbs where they are
             }
             await Each(dim, new Cmd.Brightness(steps[k].Pct), k == 0);
             if (k == 0 && reached.Count == 0) return new BatchResult(0, bulbs.Count, first ?? "no dimmable bulb");

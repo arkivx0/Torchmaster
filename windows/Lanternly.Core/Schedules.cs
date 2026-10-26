@@ -60,10 +60,12 @@ public static class Schedules
         for (int i = -1; i <= (sun ? 400 : 8); i++) // near the poles the sun may not rise or set for months
         {
             var day = today.AddDays(i);
-            if ((s.Days & DayBit(day.DayOfWeek)) == 0) continue;
+            if (!sun && (s.Days & DayBit(day.DayOfWeek)) == 0) continue;
             DateTimeOffset t;
             if (sun) { if (Sun.Event(DateOnly.FromDateTime(day), loc!, s.Trigger == "sunrise", tz) is not { } e) continue; t = e.AddMinutes(s.Offset); }
             else t = Resolve(day.AddHours(s.Hour).AddMinutes(s.Minute), tz);
+            // Days apply to the day it actually runs: a large offset can move a sun run across midnight.
+            if (sun && (s.Days & DayBit(TimeZoneInfo.ConvertTime(t, tz).DayOfWeek)) == 0) continue;
             if (t > now) return t;
         }
         return null;

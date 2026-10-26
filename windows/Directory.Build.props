@@ -7,7 +7,7 @@
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <Company>Lanternly contributors</Company>
     <Product>Lanternly</Product>
-    <Version>0.1.6</Version>
+    <Version>0.1.7</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12</LangVersion>

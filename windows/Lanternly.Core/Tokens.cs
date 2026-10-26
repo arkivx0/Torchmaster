@@ -6,7 +6,7 @@ public static class Tokens
     public static readonly IReadOnlyDictionary<string, string> Colors = new Dictionary<string, string>
     {
         ["bg"] = "#1A1B26", ["card"] = "#24283B", ["ctl"] = "#2F3549", ["ctlHover"] = "#3B4261", ["line"] = "#565F89",
-        ["fg"] = "#C0CAF5", ["dim"] = "#9AA5CE", ["accent"] = "#7AA2F7", ["onAccent"] = "#1A1B26",
+        ["fg"] = "#C0CAF5", ["dim"] = "#9AA5CE", ["accent"] = "#F25C54", ["onAccent"] = "#1A1B26",
         ["warn"] = "#E0AF68", ["onWarn"] = "#1A1B26", ["ok"] = "#9ECE6A", ["focus"] = "#7AA2F7",
     };
     /// <summary>Named bulb colors (kept separate from the UI colors).</summary>

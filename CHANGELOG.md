@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.7 (unreleased, Android versionCode 9)
+- **Fade schedules you can rely on.** Android holds a wake lock for the length of a run, so a wake-up fade keeps stepping
+  with the screen off. On both platforms a fade no longer blocks other schedules: they run on time beside it. A later
+  run on the same bulbs takes over (the fade stops where it is and Last run says so); fades on other bulbs keep going.
+  Fade-out starts from the bulbs' reported level. A run that waited too long is skipped, not run late (Windows).
+- A schedule run stops an app-side effect on that home, so the two don't fight. A built-in (in-bulb) show keeps
+  running under on/off or brightness-only schedules; add a "Stop effect" schedule to end it.
+- Sun schedules: the days you tick apply to the day it actually runs, even when the offset crosses midnight. The
+  location is stored rounded to 1 decimal (about 10 km); older stored values are rounded on load.
+- Key files where two bulbs share an address are refused again, as in 0.1.5 (stored keys with them still load, with a warning).
+- Android: bottom tabs (Lights, Schedules, Settings) replace the top-bar icons; the ✕ quit button is gone (use Back).
+- Ember Red (#F25C54) is the brand and selection color. Destructive actions carry an icon and wording (⚠ Reset bulb…,
+  ⚠ Forget everything…, ✕ Delete).
+- Windows: demo bulbs show BLE instead of OUT OF RANGE; icon glyphs fall back to Segoe UI Symbol/Emoji instead of
+  empty boxes; saving the sun location in settings now persists.
+
 ## 0.1.6 (unreleased, Android versionCode 8)
 - **Light shows.** An Effects menu for all bulbs, each room and each bulb. Twelve built-in shows run inside the
   bulb (Candlelight, Rainbow, Fireworks, Volcanic, Aurora, Happy Holidays, Red White & Blue, Vegas, Party Time,
@@ -11,7 +27,7 @@
   stop a built-in effect, and **fade in** (wake-up) or **fade out** over 5–60 minutes. Time/day schedules are
   unchanged, and older schedule files still load.
 - **Windows now matches Android** for all of the above.
-- Key files where two bulbs share an address now import, with a warning (Reset still refuses those bulbs).
+- Key files where two bulbs share an address now import, with a warning (Reset still refuses those bulbs; reverted in 0.1.7).
   Stored keys are checked the same way on load. Bulbs with no known address show "address unknown", and their own
   controls are turned off.
 - Reset bulb: the confirmation scan no longer blocks other controls on Android. Keep reconnects. A bulb with no

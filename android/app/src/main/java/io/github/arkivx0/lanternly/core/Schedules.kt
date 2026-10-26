@@ -51,9 +51,11 @@ object Schedules {
         // Sun triggers look further ahead: near the poles the sun may not rise or set for months.
         for (i in -1..(if (sun) 400L else 8L)) {
             val day = today.plusDays(i)
-            if (s.days and dayBit(day.dayOfWeek) == 0) continue
+            if (!sun && s.days and dayBit(day.dayOfWeek) == 0) continue
             val t = if (sun) Sun.event(day, loc!!, s.trigger == "sunrise", zone)?.plusMinutes(s.offset.toLong()) ?: continue
                     else ZonedDateTime.of(day, LocalTime.of(s.hour, s.minute), zone)
+            // Days apply to the day it actually runs: a large offset can move a sun run across midnight.
+            if (sun && s.days and dayBit(t.withZoneSameInstant(zone).dayOfWeek) == 0) continue
             if (t.isAfter(now)) return t
         }
         return null

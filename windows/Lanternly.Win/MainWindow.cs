@@ -25,7 +25,7 @@ public sealed class MainWindow : Window
     readonly System.Windows.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(15) };
     bool _schedulesOpen;
     readonly SemaphoreSlim _scheduleGate = new(1, 1); // one schedule run at a time
-    /// <summary>Cancels a long schedule run (a fade) when the home is switched; the fade jumps to its end level.</summary>
+    /// <summary>The short schedule run in progress (cancelled by a home switch or close). Fades are in <see cref="_fades"/>.</summary>
     CancellationTokenSource? _runCts;
     /// <summary>Running app-side effect, and what the Now playing bar stops.</summary>
     CancellationTokenSource? _effectCts;
@@ -41,6 +41,8 @@ public sealed class MainWindow : Window
     public MainWindow(bool demo)
     {
         _demo = demo;
+        // Icons (⚙ ⏰ ✓ ⚠ ■ ▶) need a symbol font; without the fallback they render as empty boxes on some systems.
+        FontFamily = Theme.UiFont;
         _set = demo ? new Settings() : Store.LoadSettings();
         _vault = demo ? DemoLink.SampleVault() : Store.LoadVault();
         _vaultWarnings = BulbReset.AddressWarnings(_vault); // shown in settings; nothing is changed
@@ -66,7 +68,7 @@ public sealed class MainWindow : Window
         top.Children.Add(title);
         System.Windows.Automation.AutomationProperties.SetLiveSetting(_status, System.Windows.Automation.AutomationLiveSetting.Polite);
         System.Windows.Automation.AutomationProperties.SetName(_homePick, "Home");
-        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { var idx = _homePick.SelectedIndex; await StopAllBlinks(); StopEffectsLocal(); _runCts?.Cancel(); await _scheduleGate.WaitAsync(); /* never swap the connection under a running schedule */ try { _set.HomeIndex = idx; Save(); await Reconnect(); } finally { _scheduleGate.Release(); } } };
+        _homePick.SelectionChanged += async (_, _) => { if (_homePick.SelectedIndex >= 0 && _homePick.SelectedIndex != _set.HomeIndex) { var idx = _homePick.SelectedIndex; await StopAllBlinks(); StopEffectsLocal(); _runCts?.Cancel(); CancelFades(null); await _scheduleGate.WaitAsync(); /* never swap the connection under a running schedule */ try { _set.HomeIndex = idx; Save(); await Reconnect(); } finally { _scheduleGate.Release(); } } };
 
         var root = new DockPanel();
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
@@ -88,7 +90,7 @@ public sealed class MainWindow : Window
         _tray.Scene += s => RunBatch(async () => CurrentHome is { } h ? await Scenes.ApplyAsync(_router, h, s) : new BatchResult(0, 0, null));
         _tray.Effect += id => { if (CurrentHome is { } h) { if (id == 0) StopEffects(h, h.Bulbs); else StartNative(h, "All bulbs", h.Bulbs, Effects.Find(id)!); } };
         Closing += (_, e) => { if (!_quitting) { e.Cancel = true; Hide(); } };
-        Closed += async (_, _) => { _clock.Stop(); StopEffectsLocal(); _runCts?.Cancel(); Microsoft.Win32.SystemEvents.TimeChanged -= OnTimeChanged; Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
+        Closed += async (_, _) => { _clock.Stop(); StopEffectsLocal(); _runCts?.Cancel(); CancelFades(null); Microsoft.Win32.SystemEvents.TimeChanged -= OnTimeChanged; Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
         Loaded += async (_, _) =>
         {
             if (Store.Quarantined is { } q)
@@ -157,20 +159,31 @@ public sealed class MainWindow : Window
         if (_schedulesOpen) Render();
     }
 
-    async Task<BatchResult> TryRun(Router r, Home h, Schedule s)
+    async Task<BatchResult> TryRun(Router r, Home h, Schedule s, CancellationToken ct)
     {
-        try { return await Schedules.RunAsync(r, h, s, _runCts?.Token ?? default); }
+        try { return await Schedules.RunAsync(r, h, s, ct); }
         catch (Exception ex) { Program.Log(ex, "schedule"); return new BatchResult(0, Schedules.Targets(h, s).Count, ex.Message); }
     }
 
     /// <summary>A schedule for a home that is not selected: a temporary connection to that home's mesh, closed afterwards.</summary>
-    async Task<BatchResult> RunOtherHome(Home h, Schedule s)
+    async Task<BatchResult> RunOtherHome(Home h, Schedule s, CancellationToken ct)
     {
         if (!_set.Ble) return new BatchResult(0, Schedules.Targets(h, s).Count, "Bluetooth is off in Lanternly settings");
         BleSession? t = null;
-        try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); return await TryRun(new Router([t]), h, s); }
+        try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); t.StateChanged += OnState; return await TryRun(new Router([t]), h, s, ct); }
         catch (Exception ex) { Program.Log(ex, "schedule other home"); return new BatchResult(0, Schedules.Targets(h, s).Count, ex.Message); }
         finally { if (t != null) await t.DisposeAsync(); }
+    }
+
+    /// <summary>Fades in progress. They run outside <see cref="_scheduleGate"/>, so schedules due meanwhile still run on time.</summary>
+    readonly List<(CancellationTokenSource Cts, HashSet<(long, int)> Keys)> _fades = [];
+
+    static HashSet<(long, int)> Keys(Home h, IEnumerable<Bulb> bulbs) => bulbs.Where(b => b.AddressKnown).Select(b => ((long)h.Id, (int)b.MeshId)).ToHashSet();
+
+    /// <summary>Stops fades on any of <paramref name="keys"/> (null = all). Their bulbs stay where they were.</summary>
+    void CancelFades(HashSet<(long, int)>? keys)
+    {
+        foreach (var f in _fades.ToList()) if (keys == null || f.Keys.Overlaps(keys)) f.Cts.Cancel();
     }
 
     async void RunSchedule(Schedule s, DateTimeOffset due)
@@ -178,30 +191,59 @@ public sealed class MainWindow : Window
         var label = Label(s);
         var h = _vault.Homes.FirstOrDefault(x => x.Id == s.HomeId);
         if (h == null) { Note(label + ": its home was removed"); return; }
+        // A newer run takes over its own bulbs only: fades on other bulbs or another home keep going.
+        var keys = Keys(h, Schedules.Targets(h, s));
+        CancelFades(keys);
+        if (h == CurrentHome) StopEffectsLocal(); // an app-side show would overwrite this run on its next step
+        var fade = Schedules.FadeMins(s.Action) != null;
+        var cts = new CancellationTokenSource();
         await _scheduleGate.WaitAsync();
-        _runCts = new CancellationTokenSource();
+        var held = true;
         try
         {
+            // It may have waited behind another run (connecting takes a while): "skipped, not run late" still applies.
+            if (!Schedules.OnTime(due, DateTimeOffset.Now)) { Note(label + $": skipped (more than {Schedules.Grace.TotalMinutes:0} minutes late)"); return; }
             var other = !_demo && h != CurrentHome;
             SetStatus(label + ": running…");
             BatchResult r;
-            if (other) r = await RunOtherHome(h, s);
+            if (fade)
+            {
+                // Connect under the gate, then let it go: a fade lasts up to an hour.
+                BleSession? t = null; Router router;
+                if (other)
+                {
+                    if (!_set.Ble) { Note(label + ": Bluetooth is off in Lanternly settings"); return; }
+                    try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); t.StateChanged += OnState; router = new Router([t]); }
+                    catch (Exception ex) { Program.Log(ex, "schedule other home"); Note($"{label}: not reachable ({ex.Message})"); return; }
+                }
+                else { if (!_demo && _ble?.LoggedIn != true) await Reconnect(); router = _router; }
+                var rec = (cts, keys);
+                _fades.Add(rec);
+                _scheduleGate.Release(); held = false;
+                try { r = await TryRun(router, h, s, cts.Token); }
+                finally { _fades.Remove(rec); if (t != null) await t.DisposeAsync(); }
+                Note($"{label}: " + (cts.IsCancellationRequested ? "fade stopped part-way (a later schedule on these bulbs, a home switch or closing took over)" : r.ToString())
+                    + (other ? $" · {h.Name} (not the selected home, temporary connection)" : ""));
+                return;
+            }
+            _runCts = cts;
+            if (other) r = await RunOtherHome(h, s, cts.Token);
             else
             {
                 if (!_demo && _ble?.LoggedIn != true) await Reconnect();
-                r = await TryRun(_router, h, s);
+                r = await TryRun(_router, h, s, cts.Token);
             }
             var retried = false;
-            if (!_demo && r.Ok == 0 && Schedules.OnTime(due, DateTimeOffset.Now)) // stale link (e.g. after sleep): reconnect and retry once
+            if (!_demo && r.Ok == 0 && !cts.IsCancellationRequested && Schedules.OnTime(due, DateTimeOffset.Now)) // stale link (e.g. after sleep): reconnect and retry once
             {
                 retried = true;
-                if (other) r = await RunOtherHome(h, s);
-                else { await Reconnect(); r = await TryRun(_router, h, s); }
+                if (other) r = await RunOtherHome(h, s, cts.Token);
+                else { await Reconnect(); r = await TryRun(_router, h, s, cts.Token); }
             }
             Note($"{label}: {r}" + (other ? $" · {h.Name} (not the selected home, temporary connection)" : "") + (retried ? " · after one retry" : ""));
         }
         catch (Exception ex) { Program.Log(ex, "schedule"); Note($"{label}: {ex.Message}"); }
-        finally { _runCts?.Dispose(); _runCts = null; _scheduleGate.Release(); UpdateRows(); }
+        finally { if (_runCts == cts) _runCts = null; cts.Dispose(); if (held) _scheduleGate.Release(); UpdateRows(); }
     }
 
     void SaveSchedules()
@@ -229,7 +271,7 @@ public sealed class MainWindow : Window
         {
             var sc = s; var home = _vault.Homes.FirstOrDefault(x => x.Id == s.HomeId);
             var line = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
-            var del = new Button { Content = "Delete", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
+            var del = new Button { Content = "✕ Delete", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
             System.Windows.Automation.AutomationProperties.SetName(del, "Delete schedule " + Schedules.Describe(home, s));
             del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); _set.LastFired.Remove(sc.Id); Save(); SaveSchedules(); Render(); };
             DockPanel.SetDock(del, Dock.Right); line.Children.Add(del);
@@ -321,6 +363,7 @@ public sealed class MainWindow : Window
         Run(async () =>
         {
             if (_demo) { SetStatus("Demo mode: nothing was reset."); return; }
+            CancelFades(Keys(h, [b])); // a fade on this bulb must not keep sending during the reset
             await _scheduleGate.WaitAsync(); // never in the middle of a schedule run
             try
             {
@@ -363,7 +406,7 @@ public sealed class MainWindow : Window
     {
         await Teardown();
         var h = CurrentHome;
-        if (_demo) { _demoLink ??= new DemoLink(); _demoLink.StateChanged += OnState; _router = new([_demoLink]); Render(); SetStatus("Demo · BLE (sample data)"); return; }
+        if (_demo) { _demoLink ??= new DemoLink(); _demoLink.StateChanged += OnState; _router = new([_demoLink]); foreach (var b in h?.Bulbs ?? []) b.Via = Via.Ble; Render(); SetStatus("Demo · BLE (sample data)"); return; }
         if (h == null) { _router = new([]); SetStatus("No bulbs yet: open ⚙ to add a reset bulb or import keys"); Render(); return; }
         var links = new List<ILink>();
         _router = new(links);
@@ -684,7 +727,7 @@ public sealed class MainWindow : Window
             if (_bri != null && s != null) { _bri.Tag = "sync"; _bri.Value = Math.Max(1, s.Brightness); _bri.Tag = null; }
             if (_ct != null && s is { Mode: <= 100 }) { _ct.Tag = "sync"; _ct.Value = s.Mode; _ct.Tag = null; }
             _via.Text = _b.Via switch { Via.Ble => "BLE", _ => "OUT OF RANGE" }; _via.FontSize = 11; _via.FontWeight = FontWeights.SemiBold;
-            _via.Foreground = _b.Via switch { Via.Ble => B("#7AA2F7"), _ => Br("Dim") };
+            _via.Foreground = _b.Via switch { Via.Ble => Br("Ok"), _ => Br("Dim") };
             _dot.Background = s is { On: true } ? (s.Mode == 0xfe ? B($"#{s.Rgb.R:X2}{s.Rgb.G:X2}{s.Rgb.B:X2}") : B("#E0AF68")) : Br("Ctl");
         }
         static Brush B(string hex) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
@@ -750,10 +793,10 @@ public sealed class MainWindow : Window
         saveLoc.Click += (_, _) =>
         {
             if (SunLocation.Parse(la.Text, lo.Text) is not { } v) { sunMsg.Text = "Latitude must be -90..90 and longitude -180..180."; return; }
-            _set.SunLat = v.Lat; _set.SunLon = v.Lon; Save(); Replan();
+            var rl = v.Rounded(); _set.SunLat = rl.Lat; _set.SunLon = rl.Lon; Save(); Replan(); // stored to 1 decimal (~10 km): plenty for sun times
             var today = DateOnly.FromDateTime(DateTime.Now);
             string F(DateTimeOffset? t) => t is { } x ? x.ToString("HH:mm") : "none";
-            sunMsg.Text = $"Saved. Today: sunrise {F(Sun.Event(today, v, true, TimeZoneInfo.Local))}, sunset {F(Sun.Event(today, v, false, TimeZoneInfo.Local))}.";
+            sunMsg.Text = $"Saved. Today: sunrise {F(Sun.Event(today, rl, true, TimeZoneInfo.Local))}, sunset {F(Sun.Event(today, rl, false, TimeZoneInfo.Local))}.";
         };
         var clearLoc = new Button { Content = "Clear", IsEnabled = _set.Sun != null };
         clearLoc.Click += (_, _) => { _set.SunLat = null; _set.SunLon = null; Save(); Replan(); Render(); };
@@ -766,8 +809,8 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.6 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
-        var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
+        about.Children.Add(Note("Lanternly 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        var forget = new Button { Content = "⚠ Forget everything…", Foreground = Br("Warn"), HorizontalAlignment = HorizontalAlignment.Left };
         forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);
         var done = new Button { Content = "Done", Style = (Style)FindResource("AccentButton"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0) };

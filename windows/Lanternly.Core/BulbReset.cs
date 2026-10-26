@@ -56,13 +56,16 @@ public static class BulbReset
         foreach (var room in h.Rooms) room.MeshIds.RemoveAll(m => m == b.MeshId);
     }
 
-    /// <summary>Key-file import check: every bulb/room address must be 0 (unknown) or 1..0x7FFF. Shared addresses import with a warning (<see cref="AddressWarnings"/>).</summary>
+    /// <summary>Key-file import check: every bulb/room address must be 0 (unknown) or 1..0x7FFF. Shared addresses are refused (as in 0.1.5); a stored vault that has them loads with a warning (<see cref="AddressWarnings"/>).</summary>
     public static void CheckImport(Vault v)
     {
         foreach (var h in v.Homes)
         {
             if (h.Bulbs.FirstOrDefault(b => b.MeshId > MaxAddress) is { } bad) throw new InvalidDataException($"bulb \"{bad.Name}\" has invalid mesh address {bad.MeshId}");
             if (h.Rooms.FirstOrDefault(r => r.MeshIds.Any(m => m > MaxAddress)) is { } br) throw new InvalidDataException($"room \"{br.Name}\" has an invalid mesh address");
+            // As in 0.1.5: two bulbs on one address can't be told apart (a command reaches both), so the file is refused.
+            if (h.Bulbs.Where(b => b.MeshId != 0).GroupBy(b => b.MeshId).FirstOrDefault(g => g.Count() > 1) is { } dup)
+                throw new InvalidDataException($"{string.Join(" and ", dup.Select(b => $"\"{b.Name}\""))} share mesh address {dup.Key}");
         }
     }
 

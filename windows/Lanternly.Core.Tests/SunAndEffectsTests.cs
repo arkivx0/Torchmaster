@@ -98,11 +98,29 @@ public class SunAndEffectsTests
         var r = await Fades.RunAsync(new Router([link]), h, h.Bulbs, true, 5, default, () => t, (ms, c) => { t += ms; return Task.CompletedTask; });
         Assert.True(r.AllOk); Assert.Equal(300_000L, t);
         Assert.Equal(new Cmd.Brightness(1), link.Sent[0].Item2); Assert.Equal(new Cmd.Power(true), link.Sent[1].Item2); Assert.Equal(new Cmd.Brightness(100), link.Sent[^1].Item2);
-        // fade out cancelled early: jumps to 1 % and turns off
+        // fade out cancelled (a later schedule took over): stops where it is, sends nothing more
         link.Sent.Clear(); t = 0; h.Bulbs[0].State = new BulbState(1, true, true, 60, 50, (0, 0, 0));
         using var cts = new CancellationTokenSource();
-        await Fades.RunAsync(new Router([link]), h, h.Bulbs, false, 10, cts.Token, () => t, (ms, c) => { t += ms; if (t >= 60_000) { cts.Cancel(); throw new OperationCanceledException(); } return Task.CompletedTask; });
-        Assert.Equal(new Cmd.Brightness(60), link.Sent[0].Item2); Assert.Equal(new Cmd.Power(false), link.Sent[^1].Item2); Assert.Equal(new Cmd.Brightness(1), link.Sent[^2].Item2);
+        var cut = await Fades.RunAsync(new Router([link]), h, h.Bulbs, false, 10, cts.Token, () => t, (ms, c) => { t += ms; if (t >= 60_000) { cts.Cancel(); throw new OperationCanceledException(); } return Task.CompletedTask; });
+        Assert.Equal(new Cmd.Brightness(60), link.Sent[0].Item2); Assert.DoesNotContain(link.Sent, x => x.Item2 is Cmd.Power); Assert.Equal("stopped part-way", cut.FirstError);
+        // fade out with no state yet: waits for the status report and starts from it
+        link.Sent.Clear(); t = 0; h.Bulbs[0].State = null; var naps = 0;
+        await Fades.RunAsync(new Router([link]), h, h.Bulbs, false, 1, default, () => t, (ms, c) => { t += ms; if (++naps == 3) h.Bulbs[0].State = new BulbState(1, true, true, 35, 50, (0, 0, 0)); return Task.CompletedTask; });
+        Assert.Equal(new Cmd.Brightness(35), link.Sent[0].Item2);
+    }
+
+    [Fact] public void OffsetAcrossMidnightUsesRunDay()
+    {
+        var z = TimeZoneInfo.FindSystemTimeZoneById("Atlantic/Reykjavik"); var loc = new SunLocation(64.1466, -21.9426);
+        var sat = new Schedule { Id = 1, Enabled = true, Days = Schedules.DayBit(DayOfWeek.Saturday), Action = "on", HomeId = 1, Target = "all", Trigger = "sunset", Offset = 180 };
+        var t = TimeZoneInfo.ConvertTime(Schedules.NextFire(sat, new DateTimeOffset(2026, 7, 31, 12, 0, 0, TimeSpan.Zero), z, loc)!.Value, z);
+        Assert.Equal(DayOfWeek.Saturday, t.DayOfWeek); Assert.Equal(1, t.Day); Assert.InRange(t.Hour, 1, 2); // Friday's sunset + 3 h
+    }
+
+    [Fact] public void LocationIsRoundedToOneDecimal()
+    {
+        Assert.Equal(new SunLocation(39.7, -105.0), new SunLocation(39.74, -104.99).Rounded());
+        Assert.Equal(new SunLocation(-33.9, 151.2), new SunLocation(-33.8688, 151.2093).Rounded());
     }
 
     [Fact] public async Task ScheduleEffectOnlyColorBulbs()

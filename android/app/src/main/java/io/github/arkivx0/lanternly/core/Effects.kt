@@ -60,7 +60,9 @@ object AppEffects {
         val rnd = Random(System.nanoTime()); var i = 0
         val wait = stepMs(name, targets.size * (if (name == "Candle flicker") 2 else 1))
         while (!stop()) {
-            for (b in targets) try { r.send(h, b, step(name, i, rnd)); if (b.has(Caps.DIM)) extra(name, rnd)?.let { r.send(h, b, it) } } catch (e: Exception) { Diag.log("app effect", e) }
+            for (b in targets) try { r.send(h, b, step(name, i, rnd)); if (b.has(Caps.DIM)) extra(name, rnd)?.let { r.send(h, b, it) } }
+                catch (e: InterruptedException) { throw e } // a cancel must stop the loop now, not at the next sleep
+                catch (e: Exception) { Diag.log("app effect", e) }
             i++; sleep(wait)
         }
     }
@@ -83,16 +85,18 @@ object Fades {
     fun durationMs(minutes: Int) = minutes.coerceIn(1, MAX_MINUTES) * 60_000L
 
     /**
-     * Blocking. Fade in: on at 1 % then up to 100 %. Fade out: from the brightest known level (100 if unknown) down to 1 %,
+     * Blocking. Fade in: on at 1 % then up to 100 %. Fade out: from the brightest current level (reported after login; 100 if no report) down to 1 %,
      * then off. Stops early at [deadlineMs] (jumping to the final level). A bulb counts if its first step reached it.
      */
     fun run(r: Router, h: Home, bulbs: List<Bulb>, fadeIn: Boolean, minutes: Int, deadlineMs: Long = Long.MAX_VALUE,
-            now: () -> Long = System::currentTimeMillis, sleep: (Long) -> Unit = { Thread.sleep(it) }): BatchResult {
+            now: () -> Long = System::currentTimeMillis, sleep: (Long) -> Unit = { Thread.sleep(it) }, settleMs: Long = 2_000): BatchResult {
         val dim = bulbs.filter { it.has(Caps.DIM) }
-        val start = if (fadeIn) 1 else (bulbs.mapNotNull { it.state?.takeIf { s -> s.on }?.brightness }.maxOrNull() ?: 100).coerceIn(1, 100)
+        // Fade-out starts from the bulbs' current level: wait briefly for the status reports that arrive after login.
+        if (!fadeIn) { var n = settleMs / 100; while (n-- > 0 && dim.any { it.state == null }) sleep(100) }
+        val start = if (fadeIn) 1 else (dim.mapNotNull { it.state?.takeIf { s -> s.on }?.brightness }.maxOrNull() ?: 100).coerceIn(1, 100)
         val steps = plan(start, if (fadeIn) 100 else 1, minutes)
         val reached = HashSet<Bulb>(); var first: String? = null
-        fun each(l: List<Bulb>, c: Cmd, count: Boolean) { for (b in l) try { r.send(h, b, c); if (count) reached += b } catch (e: Exception) { if (first == null) first = "${b.name}: ${e.message}"; Diag.log("fade", e) } }
+        fun each(l: List<Bulb>, c: Cmd, count: Boolean) { for (b in l) try { r.send(h, b, c); if (count) reached += b } catch (e: InterruptedException) { throw e } catch (e: Exception) { if (first == null) first = "${b.name}: ${e.message}"; Diag.log("fade", e) } }
         if (fadeIn) { each(dim, Cmd.Brightness(1), true); each(bulbs, Cmd.Power(true), true) }
         val t0 = now()
         for ((k, s) in steps.withIndex()) {

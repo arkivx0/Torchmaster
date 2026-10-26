@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.arkivx0.lanternly"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.6"
+        versionCode = 9
+        versionName = "0.1.7"
     }
     signingConfigs {
         if (ksFile != null) create("release") {

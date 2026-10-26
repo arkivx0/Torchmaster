@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     /** Swatch last applied per bulb from this app (bulb status reports only carry a coarse color), for the ✓. */
     private val activeSwatch = HashMap<Bulb, String>()
     private lateinit var body: LinearLayout
+    private val tabs = ArrayList<Button>()
     private var settingsOpen = false
     private var schedulesOpen = false
     private var schedules: List<Schedule> = emptyList()
@@ -84,9 +85,6 @@ class MainActivity : Activity() {
         titles.addView(text("Lanternly", 20f, FG, bold = true))
         status = text("", 13f, DIM).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }; titles.addView(status)
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(button("⏰") { schedulesOpen = !schedulesOpen; settingsOpen = false; render() }.apply { contentDescription = "Schedules"; (layoutParams as? ViewGroup.MarginLayoutParams)?.rightMargin = dp(6) })
-        top.addView(button("⚙") { settingsOpen = !settingsOpen; schedulesOpen = false; render() }.apply { contentDescription = "Settings" })
-        top.addView(button("✕") { finishAndRemoveTask() }.apply { contentDescription = "Quit Lanternly"; (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
         root.addView(top)
         // Now playing / Stop: visible whenever an effect is running, so Stop is always one tap away.
         nowBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Tokens.WARN); setPadding(dp(16), dp(4), dp(8), dp(4)); visibility = View.GONE
@@ -98,6 +96,15 @@ class MainActivity : Activity() {
         root.addView(nowBar, LinearLayout.LayoutParams(-1, -2))
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), dp(16)) }
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        // Bottom tabs (0.1.7): Lights / Schedules / Settings. No quit button: Android's Back/Recents closes the app.
+        val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(CARD); setPadding(dp(4), dp(4), dp(4), dp(4)) }
+        for ((i, t) in listOf("💡\nLights", "⏰\nSchedules", "⚙\nSettings").withIndex()) {
+            val b = Button(this).apply { text = t; isAllCaps = false; textSize = 12f; minHeight = dp(56); minimumHeight = dp(56); background = round(CARD, 8)
+                contentDescription = t.substringAfter('\n') + " tab"
+                setOnClickListener { settingsOpen = i == 2; schedulesOpen = i == 1; render() } }
+            tabs += b; tabBar.addView(b, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        }
+        root.addView(tabBar, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         render()
         store.quarantined?.let { q ->
@@ -108,7 +115,12 @@ class MainActivity : Activity() {
         if (!demo) ensurePermsThenConnect() else { router = Router(listOf(DemoLink())); setStatus("Demo · sample data") ; vault.homes.flatMap { it.bulbs }.forEach { it.via = Via.BLE }; render() }
     }
 
-    override fun onStop() { super.onStop(); stopAllBlinks(); stopAppEffect() }
+    override fun onStop() { super.onStop(); ScheduleJob.onRunStarted = null; stopAllBlinks(); stopAppEffect() }
+    override fun onStart() {
+        super.onStart()
+        // A schedule run takes over from an app-side show on that home, so the show doesn't overwrite it on its next step.
+        ScheduleJob.onRunStarted = { hid -> ui.post { if (home?.id == hid && effectLabel != null) { stopAppEffect(); setStatus("Effect stopped: a schedule ran") } } }
+    }
 
     override fun onResume() { super.onResume(); if (schedulesOpen) render() } // exact-alarm permission may have changed
 
@@ -154,7 +166,7 @@ class MainActivity : Activity() {
     }
 
     private fun connect() {
-        val h = home ?: run { router = Router(emptyList()); setStatus("No bulbs yet: tap ⚙ to add a reset bulb or import keys"); return }
+        val h = home ?: run { router = Router(emptyList()); setStatus("No bulbs yet: open the Settings tab to add a reset bulb or import keys"); return }
         io.execute {
             teardown()
             val links = ArrayList<Link>()
@@ -361,6 +373,9 @@ class MainActivity : Activity() {
         body.removeAllViews(); refreshers.clear()
         val h = home
         when { settingsOpen -> settings(); schedulesOpen -> schedulesView(); h == null -> empty(); else -> homeView(h) }
+        val sel = if (settingsOpen) 2 else if (schedulesOpen) 1 else 0
+        tabs.forEachIndexed { i, b -> val on = i == sel; b.isSelected = on; b.setTextColor(if (on) Tokens.ON_ACCENT else FG); b.background = round(if (on) ACCENT else CARD, 8)
+            if (Build.VERSION.SDK_INT >= 30) b.stateDescription = if (on) "selected" else "not selected" }
     }
 
     private fun empty() {
@@ -372,7 +387,7 @@ class MainActivity : Activity() {
     /** High-contrast banner for the key warnings (unreadable keys, no backup), with the fix one tap away. */
     private fun keyBanner() {
         val msg = when {
-            store.quarantined != null && !demo -> "Stored keys unreadable, saving is blocked. Import a key file (⚙) to fix it."
+            store.quarantined != null && !demo -> "Stored keys unreadable, saving is blocked. Import a key file (Settings tab) to fix it."
             !store.backedUp && !demo && vault.homes.isNotEmpty() -> "Your bulbs only answer to the mesh key on this phone. If it's lost, every bulb must be factory reset. Export a key file now."
             else -> return
         }
@@ -475,7 +490,7 @@ class MainActivity : Activity() {
             if (s != null && bri != null && !bri.isPressed) bri.progress = maxOf(1, s.brightness) - 1
             via.text = when (b.via) { Via.BLE -> "BLE"; else -> "OUT OF RANGE" }
             line.contentDescription = "${b.name}, " + (if (s?.on == true) "on, ${s.brightness}%" else "off") + if (b.via == Via.BLE) "" else ", out of range"
-            via.setTextColor(when (b.via) { Via.BLE -> ACCENT; else -> DIM })
+            via.setTextColor(when (b.via) { Via.BLE -> Tokens.OK; else -> DIM })
             dot.background = round(if (s?.on == true) (if (s.mode == 0xfe) Color.rgb(s.rgb.first, s.rgb.second, s.rgb.third) else YELLOW) else CTL, 5)
         }
     }
@@ -532,10 +547,10 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.6 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
-        r2.addView(button("Forget everything") {
-            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
+        r2.addView(button("⚠ Forget everything…") {
+            AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete everything") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
         })
         r2.addView(button("Done", accent = true) { settingsOpen = false; render() }.apply { (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(8) })
         c4.addView(r2); body.addView(c4, lp())
@@ -602,13 +617,13 @@ class MainActivity : Activity() {
             c.addView(button("OK") { store.schedulesQuarantined = null; render() })
         }
         if (!demo && !Alarms.exactAllowed(this)) {
-            c.addView(note("⚠ Exact alarms are not allowed. While the phone is idle Android can delay runs by more than ${Schedules.GRACE_MS / 60_000} minutes, and then they are skipped, not run late; two schedules within about 9 minutes of each other may lose one. Allow \"Alarms & reminders\" for Lanternly to fix this."))
+            c.addView(note("⚠ Exact alarms are not allowed. While the phone is idle Android can delay runs by more than ${Schedules.GRACE_MS / 60_000} minutes, and then they are skipped, not run late; two schedules within about 9 minutes of each other may lose one. A fade can also jump straight to its final level, because a run without exact alarms gets only a few seconds. Allow \"Alarms & reminders\" for Lanternly to fix this."))
             if (Build.VERSION.SDK_INT >= 31) c.addView(button("Allow exact alarms") {
                 try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName"))) } catch (e: Exception) { Diag.log("exact alarm settings", e) }
             })
         }
         store.lastRun?.takeIf { !demo }?.let { c.addView(note("Last run: $it")) }
-        if (schedules.any { it.trigger != "time" } && store.sunLocation == null) c.addView(note("⚠ Sunrise/sunset schedules don't run until you enter a location in ⚙ settings."))
+        if (schedules.any { it.trigger != "time" } && store.sunLocation == null) c.addView(note("⚠ Sunrise/sunset schedules don't run until you enter a location in the Settings tab."))
         if (schedules.isEmpty()) c.addView(note("No schedules yet."))
         for (s in schedules) {
             val h = vault.homes.firstOrNull { it.id == s.homeId }
@@ -618,8 +633,8 @@ class MainActivity : Activity() {
             val sw = switch().apply { isChecked = s.enabled; contentDescription = "Enabled: $desc" }
             sw.setOnClickListener { val n = s.copy(enabled = sw.isChecked); saveSchedules(schedules.map { if (it.id == s.id) n else it }, changed = n) }
             line.addView(sw)
-            line.addView(button("✕") {
-                AlertDialog.Builder(this).setMessage("Delete this schedule?\n$desc").setPositiveButton("Delete") { _, _ -> saveSchedules(schedules.filter { it.id != s.id }, removed = s); render() }.setNegativeButton("Cancel", null).show()
+            line.addView(button("✕ Delete") {
+                AlertDialog.Builder(this).setMessage("Delete this schedule?\n$desc").setPositiveButton("Delete schedule") { _, _ -> saveSchedules(schedules.filter { it.id != s.id }, removed = s); render() }.setNegativeButton("Cancel", null).show()
             }.apply { contentDescription = "Delete schedule $desc"; (layoutParams as? ViewGroup.MarginLayoutParams)?.leftMargin = dp(6) })
             c.addView(line)
         }
@@ -642,7 +657,7 @@ class MainActivity : Activity() {
         val off = edit("Offset in minutes (e.g. -30 = 30 min before)", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED).apply { setText("0"); visibility = View.GONE }
         box.addView(off)
         val sunNote = TextView(this).apply { textSize = 12f; visibility = View.GONE
-            text = if (store.sunLocation == null) "No location set: enter latitude/longitude in ⚙ settings or this won't run." else "Uses the location in ⚙ settings." }
+            text = if (store.sunLocation == null) "No location set: enter latitude/longitude in the Settings tab or this won't run." else "Uses the location in the Settings tab." }
         box.addView(sunNote)
         trig.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { tp.visibility = if (pos == 0) View.VISIBLE else View.GONE; off.visibility = if (pos == 0) View.GONE else View.VISIBLE; sunNote.visibility = off.visibility }

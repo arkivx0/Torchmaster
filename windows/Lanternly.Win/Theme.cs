@@ -21,6 +21,9 @@ public static class Theme
     }
 
     /// <summary>Theme XAML with the shared color tokens (Lanternly.Core.Tokens, from spec/theme_tokens.json) filled in.</summary>
+    /// <summary>UI font with symbol/emoji fallback so icon glyphs never render as empty boxes.</summary>
+    public static readonly System.Windows.Media.FontFamily UiFont = new("Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Symbol, Segoe UI Emoji");
+
     public static ResourceDictionary Load()
     {
         var x = Xaml;
@@ -45,6 +48,7 @@ public static class Theme
   <SolidColorBrush x:Key="OnWarn" Color="{onWarn}"/>
   <SolidColorBrush x:Key="AccentFg" Color="{onAccent}"/>
   <SolidColorBrush x:Key="Focus" Color="{focus}"/>
+  <SolidColorBrush x:Key="Ok" Color="{ok}"/>
   <!-- keyboard focus ring: 2px outline (restored in 0.1.6; was removed everywhere) -->
   <Style x:Key="FocusRing">
     <Setter Property="Control.Template">
@@ -57,6 +61,7 @@ public static class Theme
   </Style>
 
   <Style TargetType="Window">
+    <Setter Property="FontFamily" Value="Segoe UI, Segoe Fluent Icons, Segoe MDL2 Assets, Segoe UI Symbol, Segoe UI Emoji"/>
     <Setter Property="Background" Value="{StaticResource Bg}"/>
     <Setter Property="Foreground" Value="{StaticResource Fg}"/>
   </Style>

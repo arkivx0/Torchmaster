@@ -143,6 +143,8 @@ class ScheduleService : Service() {
     private val worker = Executors.newCachedThreadPool()
     /** Runs accepted but not finished, and the newest start id: the service stops only when no run is left. */
     private val active = java.util.concurrent.atomic.AtomicInteger()
+    private class RunningFade(val keys: Set<String>, val f: java.util.concurrent.Future<*>, val intent: Intent)
+    private val fades = java.util.concurrent.CopyOnWriteArraySet<RunningFade>()
     @Volatile private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -158,14 +160,27 @@ class ScheduleService : Service() {
         }
         val i = intent ?: run { if (active.get() == 0) stopSelf(startId); return START_NOT_STICKY }
         active.incrementAndGet()
-        queue.execute {
-            val budget = ScheduleJob.budgetFor(applicationContext, i)
+        val budget = ScheduleJob.budgetFor(applicationContext, i)
+        val isFade = budget > ScheduleJob.SERVICE_BUDGET_MS
+        val job = Runnable {
+            // A newer run takes over from a fade still going on any of the same bulbs (only those: other bulbs or
+            // another home keep fading). The stopped fade leaves its bulbs where they were and says so in Last run.
+            val keys = ScheduleJob.targetKeys(applicationContext, i)
+            fades.filter { it.keys.any { k -> k in keys } }.forEach { old ->
+                if (old.f.cancel(true)) ScheduleJob.noteFor(applicationContext, old.intent, "fade stopped part-way: a later schedule took over these bulbs")
+            }
             val f = worker.submit { ScheduleJob.run(applicationContext, i, budget) }
+            val rec = RunningFade(keys, f, i)
+            if (isFade) fades += rec
             try { f.get(budget + 5_000, TimeUnit.MILLISECONDS) }
             catch (e: TimeoutException) { f.cancel(true); ScheduleJob.failed(applicationContext, i, "timed out") }
+            catch (e: java.util.concurrent.CancellationException) { Diag.log("fade replaced by a newer schedule run") }
             catch (e: Exception) { Diag.log("schedule", e) }
-            finally { if (active.decrementAndGet() == 0) stopSelf(lastStartId) }
+            finally { fades -= rec; if (active.decrementAndGet() == 0) stopSelf(lastStartId) }
         }
+        // Normal runs are short and go one at a time. A fade (up to 60 min) runs beside the queue, so schedules
+        // due during it start on time instead of waiting behind it and being skipped as late.
+        if (isFade) worker.execute(job) else queue.execute(job)
         return START_NOT_STICKY
     }
 
@@ -198,6 +213,22 @@ object ScheduleJob {
         val id = intent.getLongExtra(Alarms.EXTRA_ID, 0)
         SERVICE_BUDGET_MS + (Store(ctx).loadSchedules().firstOrNull { it.id == id }?.let { Schedules.extraRunMs(it) } ?: 0L)
     } catch (e: Exception) { Diag.log("schedule budget", e); SERVICE_BUDGET_MS }
+    /** Called when a run starts on a home (the activity stops its app-side show there). */
+    @Volatile var onRunStarted: ((Long) -> Unit)? = null
+
+    /** "homeId:meshId" for every bulb [intent]'s schedule controls (empty if unknown). */
+    fun targetKeys(ctx: Context, intent: Intent): Set<String> = try {
+        val store = Store(ctx); val id = intent.getLongExtra(Alarms.EXTRA_ID, 0)
+        val s = store.loadSchedules().firstOrNull { it.id == id }
+        val h = s?.let { x -> store.loadQuiet()?.homes?.firstOrNull { it.id == x.homeId } }
+        if (s == null || h == null) emptySet() else Schedules.targets(h, s).filter { it.addressKnown }.map { "${h.id}:${it.meshId}" }.toSet()
+    } catch (e: Exception) { Diag.log("schedule targets", e); emptySet() }
+
+    fun noteFor(ctx: Context, intent: Intent, msg: String) {
+        try { val store = Store(ctx); store.loadSchedules().firstOrNull { it.id == intent.getLongExtra(Alarms.EXTRA_ID, 0) }?.let { note(store, it, msg) } }
+        catch (e: Exception) { Diag.log("schedule note", e) }
+    }
+
     private fun note(store: Store, s: Schedule, msg: String) {
         store.lastRun = "${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date())} · ${label(s)}: $msg"
     }
@@ -213,7 +244,14 @@ object ScheduleJob {
         } catch (e: Exception) { Diag.log("schedule failed note", e) }
     }
 
+    /** Holds a partial wake lock (timeout = budget) so a fade keeps stepping with the screen off. */
     fun run(ctx: Context, intent: Intent, budgetMs: Long) {
+        val wl = try { (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Lanternly:schedule").apply { setReferenceCounted(false); acquire(budgetMs + 5_000) } } catch (e: Exception) { Diag.log("wake lock", e); null }
+        try { runLocked(ctx, intent, budgetMs) } finally { try { if (wl?.isHeld == true) wl.release() } catch (e: Exception) { Diag.log("wake lock release", e) } }
+    }
+
+    private fun runLocked(ctx: Context, intent: Intent, budgetMs: Long) {
         val start = System.currentTimeMillis(); val deadline = start + budgetMs
         val id = intent.getLongExtra(Alarms.EXTRA_ID, 0); val due = intent.getLongExtra(Alarms.EXTRA_DUE, 0); val attempt = intent.getIntExtra(Alarms.EXTRA_ATTEMPT, 0)
         val store = Store(ctx)
@@ -231,6 +269,7 @@ object ScheduleJob {
         val vault = store.loadQuiet() ?: run { note(store, s, "stored keys unreadable"); return }
         val h = vault.homes.firstOrNull { it.id == s.homeId } ?: run { note(store, s, "its home was removed"); return }
         if (Schedules.targets(h, s).isEmpty()) { note(store, s, "no bulbs to control"); return }
+        try { onRunStarted?.invoke(h.id) } catch (e: Exception) { Diag.log("schedule run hook", e) }
         var last: String? = null
         // 1. The app's own open session, if it is logged in to this home.
         // The run deadline applies here too: a hung write on the borrowed link must not eat the whole budget.
@@ -254,6 +293,7 @@ object ScheduleJob {
             var ses: BleSession? = null
             try {
                 ses = BleSession(AndroidGatt.connect(ctx, mac, deadline), h)
+                ses.onState = { _, st -> h.bulbs.filter { it.meshId == st.meshId }.forEach { it.state = st } } // current levels (fade-out starts there)
                 ses.login()
                 val res = Schedules.run(Router(listOf(ses)), h, s, deadline - 2_000)
                 Thread.sleep(400) // let the last unacknowledged write leave the radio before disconnecting

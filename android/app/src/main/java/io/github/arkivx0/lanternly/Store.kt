@@ -128,8 +128,15 @@ class Store(ctx: Context) {
 
     /** Optional coordinates for sunrise/sunset schedules, typed by the user in settings (no location permission). */
     var sunLocation: SunLocation?
-        get() = if (!prefs.contains("sunLat")) null else SunLocation(prefs.getFloat("sunLat", 0f).toDouble(), prefs.getFloat("sunLon", 0f).toDouble()).takeIf { SunLocation.valid(it.lat, it.lon) }
-        set(v) { prefs.edit().apply { if (v == null) { remove("sunLat"); remove("sunLon") } else { putFloat("sunLat", v.lat.toFloat()); putFloat("sunLon", v.lon.toFloat()) } }.commit() }
+        get() {
+            if (!prefs.contains("sunLat")) return null
+            val raw = SunLocation(prefs.getFloat("sunLat", 0f).toDouble(), prefs.getFloat("sunLon", 0f).toDouble())
+            val r = raw.rounded().takeIf { SunLocation.valid(it.lat, it.lon) } ?: return null
+            if (Math.abs(raw.lat - r.lat) > 1e-4 || Math.abs(raw.lon - r.lon) > 1e-4) sunLocation = r // older versions stored it more precisely
+            return r
+        }
+        /** Stored rounded to 1 decimal (about 10 km): plenty for sun times (under a minute off), and less revealing. */
+        set(v) { prefs.edit().apply { if (v == null) { remove("sunLat"); remove("sunLon") } else { val r = v.rounded(); putFloat("sunLat", r.lat.toFloat()); putFloat("sunLon", r.lon.toFloat()) } }.commit() }
 
     companion object { private val LOCK = Any() }
 

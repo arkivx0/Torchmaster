@@ -113,13 +113,14 @@ class ProtocolTest {
         assertFalse(BulbReset.confirmed(Bulb("x", 2, 6, ""), listOf("")))
     }
 
-    /** Key-file import rejects group/broadcast addresses; duplicates import with a warning; 0 (unknown) is allowed. */
+    /** Key-file import rejects group/broadcast and duplicate addresses (as in 0.1.5); a stored vault with duplicates loads with a warning; 0 (unknown) is allowed. */
     @Test fun importValidatesAddresses() {
         fun file(vararg ids: Int, room: Int = 2) = Vault(listOf(Home(1, "H", "n", "p", listOf(Room(1, "R", listOf(room))),
             ids.mapIndexed { i, m -> Bulb("B$i", m, 6, "AA:BB:CC:DD:EE:0$i") }.toMutableList()))).toJson()
         assertEquals(2, KeyFile.import(file(2, 3), null).homes[0].bulbs.size)
         assertEquals(2, KeyFile.import(file(0, 0), null).homes[0].bulbs.size)
-        val dup = KeyFile.import(file(2, 2), null)
+        assertThrows(IllegalArgumentException::class.java) { KeyFile.import(file(2, 2), null) }
+        val dup = Vault.fromJson(file(2, 2)) // e.g. a vault stored by 0.1.6
         assertEquals(2, dup.homes[0].bulbs.size)
         assertTrue(BulbReset.addressWarnings(dup).any { "share mesh address 2" in it })
         assertNotNull(BulbReset.refuseReason(dup.homes[0], dup.homes[0].bulbs[0]))

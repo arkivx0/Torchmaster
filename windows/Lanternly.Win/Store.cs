@@ -17,7 +17,7 @@ public sealed class Settings
     /// <summary>Optional coordinates for sunrise/sunset schedules, typed by the user (no location service).</summary>
     public double? SunLat { get; set; }
     public double? SunLon { get; set; }
-    [System.Text.Json.Serialization.JsonIgnore] public SunLocation? Sun => SunLat is { } a && SunLon is { } b && SunLocation.Valid(a, b) ? new(a, b) : null;
+    [System.Text.Json.Serialization.JsonIgnore] public SunLocation? Sun => SunLat is { } a && SunLon is { } b && SunLocation.Valid(a, b) ? new SunLocation(a, b).Rounded() : null;
 }
 
 /// <summary>
@@ -69,7 +69,12 @@ public static class Store
 
     public static Settings LoadSettings()
     {
-        try { return File.Exists(SettingsPath) ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath)) ?? new() : new(); }
+        try
+        {
+            var s = File.Exists(SettingsPath) ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath)) ?? new() : new();
+            if (s.Sun is { } r && (s.SunLat != r.Lat || s.SunLon != r.Lon)) { s.SunLat = r.Lat; s.SunLon = r.Lon; try { SaveSettings(s); } catch (Exception ex) { Program.Log(ex, "settings round"); } } // older versions stored more decimals
+            return s;
+        }
         catch (Exception ex) { Program.Log(ex, "settings load"); return new(); }
     }
     public static void SaveSettings(Settings s) { Directory.CreateDirectory(Dir); File.WriteAllText(SettingsPath, JsonSerializer.Serialize(s)); }

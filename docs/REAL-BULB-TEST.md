@@ -22,7 +22,7 @@ Windows crash details: `%LOCALAPPDATA%\Lanternly\crash.log` (types and stack tra
       5 s it stops by itself and the button returns to normal.
    2. Tap, then tap again within 5 s: it stops right away ("Stopped blinking <name>").
    3. Tap, then open and close settings (Android) or switch homes, then tap again: it stops (no second start).
-   4. Android: tap, then rotate the phone; and separately tap, then press Home or close the app (✕). The bulb stops
+   4. Android: tap, then rotate the phone; and separately tap, then press Home or swipe the app away. The bulb stops
       blinking, the app does not crash.
    5. Windows: tap, then quit from the tray (Quit). The bulb stops blinking before the app exits.
    6. With the bulb out of range (or Bluetooth off), tap: the status says "<name>: not reachable" and the next tap
@@ -90,6 +90,17 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
 6. Negative check: with Bluetooth off (or the bulb out of range), Reset bulb… reports "reset not sent … Nothing was
    removed" and the bulb stays in the list.
 7. Android 13+: on a fresh install, the app asks for notifications once. Deny it: schedules still run.
+
+## J. 0.1.7: fades, tabs, Windows demo
+1. Android, screen off: a 10-minute fade-in schedule on one bulb. Lock the phone. The bulb should step up about every
+   30 s and reach 100 % on time (wake lock). Last run shows the result.
+2. During a 30-minute fade, add a schedule 2 minutes out on a *different* bulb: it runs on time and the fade continues.
+   Then one on the *same* bulb: it runs, and Last run says the fade stopped part-way.
+3. Fade-out on a bulb at 40 %: the first step stays near 40 % (no jump to 100 %).
+4. Start Color cycle, then let a schedule on that home fire: the effect stops and the schedule's result stays.
+5. Android: bottom tabs switch Lights / Schedules / Settings, TalkBack reads "… tab, selected"; no ✕ button.
+6. Windows `--demo`: bulbs show BLE; ⚙ ⏰ ✓ ⚠ ■ glyphs render (not boxes). Save a location: reopen settings, it is kept, rounded to 1 decimal.
+7. Import a key file with two bulbs on one address: refused with a message naming them.
 
 ## I. 0.1.6: effects, sun schedules, fades, design fixes
 1. Effects on a full-color bulb: ⋯ → Effects → Candlelight. Expect the bulb to flicker on its own and the amber

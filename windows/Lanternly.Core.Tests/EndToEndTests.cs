@@ -253,7 +253,7 @@ public class EndToEndTests
         Assert.False(BulbReset.Confirmed(new Bulb { Mac = "" }, [""]));
     }
 
-    [Fact] // key-file import rejects group/broadcast addresses; duplicates import with a warning; 0 (unknown) is allowed
+    [Fact] // key-file import rejects group/broadcast addresses; duplicates are refused (a stored vault with them loads with a warning); 0 (unknown) is allowed
     public void ImportValidatesAddresses()
     {
         static string File(int room, params int[] ids) => new Vault { Homes = [new Home { Id = 1, Name = "H", MeshName = "n", MeshPassword = "p",
@@ -261,7 +261,8 @@ public class EndToEndTests
             Bulbs = ids.Select((m, i) => new Bulb { Name = $"B{i}", MeshId = (ushort)m, Type = 6, Mac = $"AA:BB:CC:DD:EE:0{i}" }).ToList() }] }.ToJson();
         Assert.Equal(2, KeyFile.Import(File(2, 2, 3), null).Homes[0].Bulbs.Count);
         Assert.Equal(2, KeyFile.Import(File(2, 0, 0), null).Homes[0].Bulbs.Count);
-        var dup = KeyFile.Import(File(2, 2, 2), null);
+        Assert.Throws<InvalidDataException>(() => KeyFile.Import(File(2, 2, 2), null)); // as in 0.1.5
+        var dup = Vault.FromJson(File(2, 2, 2)); // e.g. a vault stored by 0.1.6: loads with a warning
         Assert.Equal(2, dup.Homes[0].Bulbs.Count);
         Assert.Contains(BulbReset.AddressWarnings(dup), w => w.Contains("share mesh address 2"));
         Assert.NotNull(BulbReset.RefuseReason(dup.Homes[0], dup.Homes[0].Bulbs[0]));
