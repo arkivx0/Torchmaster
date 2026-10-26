@@ -120,10 +120,13 @@ public sealed class BleSession : ILink, IAsyncDisposable
         if (r.Length == 0 || r[0] != Ble.PairConfirmed) throw new IOException("bulb did not confirm the new mesh key");
     }
 
+    readonly SemaphoreSlim _writeLock = new(1, 1);
+
     public Task SendAsync(Home h, Bulb b, Cmd c, CancellationToken ct = default)
         => Send(b.MeshId, c);
 
-    public Task Send(ushort target, Cmd c)
+    /// <summary>Writes are serialized per session, so commands reach the bulb in the order they were issued.</summary>
+    public async Task Send(ushort target, Cmd c)
     {
         var (cmd, data) = c switch
         {
@@ -134,8 +137,13 @@ public sealed class BleSession : ILink, IAsyncDisposable
             Cmd.Identify i => (Ble.CmdIdentify, Ble.IdentifyData(i.Start)),
             _ => throw new ArgumentException("unknown command"),
         };
-        var pkt = Ble.Command(_sk ?? throw new InvalidOperationException("BLE not logged in"), _mac, NextSeq(), target, cmd, data);
-        return _g.WriteAsync(Ble.CommandChar, pkt, false);
+        await _writeLock.WaitAsync();
+        try
+        {
+            var pkt = Ble.Command(_sk ?? throw new InvalidOperationException("BLE not logged in"), _mac, NextSeq(), target, cmd, data);
+            await _g.WriteAsync(Ble.CommandChar, pkt, false);
+        }
+        finally { _writeLock.Release(); }
     }
 
     public ValueTask DisposeAsync() { _sk = null; return _g.DisposeAsync(); }

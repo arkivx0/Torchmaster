@@ -55,7 +55,7 @@ object Scenes {
         Scene("Relax", listOf(Cmd.Power(true), Cmd.Brightness(45), Cmd.Temp(10))),
         Scene("Focus", listOf(Cmd.Power(true), Cmd.Brightness(90), Cmd.Temp(100))),
         Scene("Night", listOf(Cmd.Power(true), Cmd.Brightness(8), Cmd.Temp(1))),
-        Scene("Red", listOf(Cmd.Power(true), Cmd.Rgb(255, 0, 0))),
+        Scene("Red", listOf(Cmd.Power(true), Cmd.Brightness(100), Cmd.Rgb(255, 0, 0))),
         Scene("Off", listOf(Cmd.Power(false))),
     )
     /** A bulb counts as updated only if every step reached it. */

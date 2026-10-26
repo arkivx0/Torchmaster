@@ -70,12 +70,13 @@ public class ProtocolTests
 public class SceneTests
 {
     [Fact]
-    public void RedSceneIsPowerOnPlusRedAndOnlyColorBulbsGetTheColor()
+    public void RedSceneIsPowerOnFullBrightnessPlusRedAndOnlyColorBulbsGetTheColor()
     {
         var red = Scenes.All.First(s => s.Name == "Red");
-        Assert.Equal([new Cmd.Power(true), new Cmd.Rgb(255, 0, 0)], red.Steps);
-        Assert.Equal(2, Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Color).Count());
-        Assert.Equal([new Cmd.Power(true)], Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Temp));
+        Assert.Equal([new Cmd.Power(true), new Cmd.Brightness(100), new Cmd.Rgb(255, 0, 0)], red.Steps);
+        Assert.Equal(3, Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Color).Count());
+        Assert.Equal([new Cmd.Power(true), new Cmd.Brightness(100)], Scenes.For(red, Caps.OnOff | Caps.Dim | Caps.Temp));
+        Assert.Equal([new Cmd.Power(true)], Scenes.For(red, Caps.OnOff));
     }
 
     [Fact] // Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop).

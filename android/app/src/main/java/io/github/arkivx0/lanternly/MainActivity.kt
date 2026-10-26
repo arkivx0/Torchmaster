@@ -18,6 +18,8 @@ import android.view.ViewGroup
 import android.widget.*
 import io.github.arkivx0.lanternly.core.*
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
     companion object {
@@ -30,7 +32,12 @@ class MainActivity : Activity() {
 
     private lateinit var store: Store
     private var vault = Vault()
-    private val io = Executors.newSingleThreadExecutor()
+    private val io = Executors.newSingleThreadExecutor() // connect, scan, add (may sleep)
+    /** Bulb commands only, so scan/add sleeps never delay them (e.g. a blink stop). */
+    private val cmdIo = Executors.newSingleThreadExecutor()
+    /** Active "find" blinks, held here (not in rows) so they survive row rebuilds and get stopped on exit. */
+    private val blinks = Blinks<Bulb, Home>()
+    @Volatile private var closing = false
     private val ui = Handler(Looper.getMainLooper())
     private var router = Router(emptyList())
     private var ble: BleSession? = null
@@ -72,7 +79,22 @@ class MainActivity : Activity() {
         if (!demo) ensurePermsThenConnect() else { router = Router(listOf(DemoLink())); setStatus("Demo · sample data") ; vault.homes.flatMap { it.bulbs }.forEach { it.via = Via.BLE }; render() }
     }
 
-    override fun onDestroy() { super.onDestroy(); teardown(); io.shutdown() }
+    override fun onStop() { super.onStop(); stopAllBlinks() }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopAllBlinks()
+        closing = true
+        cmdIo.shutdown()
+        try { cmdIo.awaitTermination(2, TimeUnit.SECONDS) } catch (_: InterruptedException) {} // let queued stops go out
+        teardown(); io.shutdown()
+    }
+
+    /** Cancels blink timers and queues a stop for every bulb still blinking. */
+    private fun stopAllBlinks() {
+        ui.removeCallbacksAndMessages(null)
+        for ((b, h) in blinks.drain()) send(h, listOf(b), Cmd.Identify(false), quiet = true)
+    }
 
     // ---------- connections ----------
     private fun ensurePermsThenConnect() {
@@ -125,20 +147,42 @@ class MainActivity : Activity() {
 
     private fun onState(h: Home, s: BulbState) { h.bulbs.filter { it.meshId == s.meshId }.forEach { it.state = s }; post { refresh() } }
 
-    private fun send(h: Home, bulbs: List<Bulb>, c: Cmd) {
-        io.execute {
+    private fun send(h: Home, bulbs: List<Bulb>, c: Cmd, quiet: Boolean = false, done: ((BatchResult) -> Unit)? = null) {
+        if (cmdIo.isShutdown) return
+        try { cmdIo.execute {
             var err: String? = null; var ok = 0
             for (b in bulbs) try {
                 router.send(h, b, c)
+                if (c is Cmd.Identify) { ok++; continue } // identify does not change on/brightness/color
                 val st = b.state ?: BulbState(b.meshId, true, false, 50, 50, Triple(0, 0, 0))
                 b.state = when (c) { is Cmd.Power -> st.copy(on = c.on); is Cmd.Brightness -> st.copy(brightness = c.pct, on = c.pct > 0); is Cmd.Temp -> st.copy(mode = c.ct); is Cmd.Rgb -> st.copy(mode = 0xfe, rgb = Triple(c.r, c.g, c.b)); is Cmd.Identify -> st }
                 ok++
             } catch (e: Exception) { if (err == null) err = "${b.name}: ${e.message}"; Diag.log("send", e) }
             val r = BatchResult(ok, bulbs.size, err)
-            post { if (!r.allOk || r.total > 1) setStatus(r.toString()); refresh() }
-        }
+            if (!closing) post { if (done != null) done(r) else if (!quiet && (!r.allOk || r.total > 1)) setStatus(r.toString()); refresh() }
+        } } catch (e: RejectedExecutionException) { Diag.log("send after close", e) }
     }
-    private fun scene(h: Home, s: Scenes.Scene) = io.execute { val r = Scenes.apply(router, h, s); post { setStatus(r.toString()); refresh() } }
+    private fun scene(h: Home, s: Scenes.Scene) {
+        if (cmdIo.isShutdown) return
+        try { cmdIo.execute { val r = Scenes.apply(router, h, s); if (!closing) post { setStatus(r.toString()); refresh() } } } catch (e: RejectedExecutionException) { Diag.log("scene after close", e) }
+    }
+
+    // ---------- find this bulb ----------
+    private fun toggleBlink(h: Home, b: Bulb) {
+        if (blinks.stop(b)) {
+            send(h, listOf(b), Cmd.Identify(false), done = { r -> setStatus(if (r.allOk) "Stopped blinking ${b.name}" else r.firstError ?: "${b.name}: not reachable") })
+            refresh(); return
+        }
+        val id = blinks.start(b, h)
+        lateinit var timer: Runnable
+        timer = Runnable { if (blinks.expire(b, id)) { send(h, listOf(b), Cmd.Identify(false), quiet = true) ; setStatus("Stopped blinking ${b.name}"); refresh() } }
+        send(h, listOf(b), Cmd.Identify(true), done = { r ->
+            if (r.allOk) { if (blinks.isActive(b)) setStatus("Blinking ${b.name}… tap ◎ again to stop") }
+            else { if (blinks.cancel(b, id)) ui.removeCallbacks(timer); setStatus(r.firstError ?: "${b.name}: not reachable") }
+        })
+        ui.postDelayed(timer, 5000)
+        refresh()
+    }
 
     // ---------- UI ----------
     private fun refresh() = refreshers.forEach { it() }
@@ -189,12 +233,8 @@ class MainActivity : Activity() {
         val dot = View(this); line.addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(8) })
         line.addView(text(b.name, 14f, FG), LinearLayout.LayoutParams(0, -2, 1f))
         val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(dp(18), 0, 0, dp(4)) }
-        var blinking = false
-        val stopBlink = Runnable { if (blinking) { blinking = false; send(h, listOf(b), Cmd.Identify(false)) } }
-        line.addView(button("◎") {
-            ui.removeCallbacks(stopBlink)
-            if (blinking) stopBlink.run() else { blinking = true; send(h, listOf(b), Cmd.Identify(true)); ui.postDelayed(stopBlink, 5000) }
-        }.apply { contentDescription = "Find this bulb" })
+        val find = button("◎") { toggleBlink(h, b) }.apply { contentDescription = "Find this bulb" }
+        line.addView(find)
         if (b.has(Caps.TEMP) || b.has(Caps.COLOR)) line.addView(button("⋯") { extra.visibility = if (extra.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
         val via = text("", 10f, DIM).apply { setPadding(dp(6), dp(2), dp(6), dp(2)); background = round(CTL, 4) }
         line.addView(via, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(6); rightMargin = dp(6) })
@@ -215,6 +255,9 @@ class MainActivity : Activity() {
         parent.addView(extra)
         refreshers += {
             val s = b.state
+            val on = blinks.isActive(b)
+            find.background = round(if (on) ACCENT else CTL, 8); find.setTextColor(if (on) BG else FG)
+            find.contentDescription = if (on) "Stop blinking" else "Find this bulb"
             sw.isChecked = s?.on == true
             if (s != null && bri != null && !bri.isPressed) bri.progress = maxOf(1, s.brightness) - 1
             via.text = when (b.via) { Via.BLE -> "BLE"; else -> "OUT OF RANGE" }
@@ -363,8 +406,8 @@ class MainActivity : Activity() {
     private fun note(s: String) = text(s, 12f, DIM).apply { setPadding(0, dp(2), 0, dp(6)) }
     private fun button(s: String, accent: Boolean = false, f: () -> Unit) = Button(this).apply {
         text = s; isAllCaps = false; setTextColor(if (accent) BG else FG); background = round(if (accent) ACCENT else CTL, 8)
-        minHeight = dp(36); minimumHeight = dp(36); minWidth = dp(44); minimumWidth = dp(44); setPadding(dp(12), 0, dp(12), 0); setOnClickListener { f() }
-        layoutParams = LinearLayout.LayoutParams(-2, dp(36))
+        minHeight = dp(48); minimumHeight = dp(48); minWidth = dp(48); minimumWidth = dp(48); setPadding(dp(12), 0, dp(12), 0); setOnClickListener { f() }
+        layoutParams = LinearLayout.LayoutParams(-2, dp(48))
     }
     private fun chip(s: String, selected: Boolean, f: () -> Unit) = TextView(this).apply {
         text = s; textSize = 13f; setTextColor(if (selected) BG else FG); background = round(if (selected) ACCENT else CTL, 16)

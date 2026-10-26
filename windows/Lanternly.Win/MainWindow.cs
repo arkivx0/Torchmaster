@@ -16,6 +16,9 @@ public sealed class MainWindow : Window
     Router _router = new([]);
     readonly Dictionary<Bulb, BulbRow> _rows = [];
     bool _settingsOpen, _quitting;
+    /// <summary>Active "find" blinks, at window level so they survive row rebuilds and are stopped on quit.</summary>
+    readonly Blinks<Bulb> _blinks = new();
+    readonly Dictionary<Bulb, Home> _blinkHome = [];
 
     Home? CurrentHome => _vault.Homes.Count == 0 ? null : _vault.Homes[Math.Clamp(_set.HomeIndex, 0, _vault.Homes.Count - 1)];
 
@@ -50,7 +53,7 @@ public sealed class MainWindow : Window
         _tray.AllPower += on => RunBatch(async () => CurrentHome is { } h ? await _router.SendManyAsync(h, h.Bulbs, new Cmd.Power(on)) : new BatchResult(0, 0, null));
         _tray.Scene += s => RunBatch(async () => CurrentHome is { } h ? await Scenes.ApplyAsync(_router, h, s) : new BatchResult(0, 0, null));
         Closing += (_, e) => { if (!_quitting) { e.Cancel = true; Hide(); } };
-        Closed += async (_, _) => { _tray.Dispose(); await Teardown(); Application.Current.Shutdown(); };
+        Closed += async (_, _) => { _tray.Dispose(); await StopAllBlinks(); await Teardown(); Application.Current.Shutdown(); };
         Loaded += async (_, _) =>
         {
             if (Store.Quarantined is { } q)
@@ -79,6 +82,41 @@ public sealed class MainWindow : Window
         try { var r = await f(); if (r.Total > 1 || !r.AllOk) SetStatus(r.ToString()); }
         catch (Exception ex) { Program.Log(ex, "batch"); SetStatus(ex.Message); }
         UpdateRows();
+    }
+
+    // ---------------- find this bulb ----------------
+    /// <summary>Sends a stop to every bulb still blinking (used before quitting).</summary>
+    async Task StopAllBlinks()
+    {
+        foreach (var b in _blinks.Drain())
+        {
+            if (!_blinkHome.Remove(b, out var h)) continue;
+            try { await Send(h, b, new Cmd.Identify(false)).WaitAsync(TimeSpan.FromSeconds(3)); }
+            catch (Exception ex) { Program.Log(ex, "blink stop on quit"); }
+        }
+    }
+
+    void ToggleBlink(Home h, Bulb b)
+    {
+        if (_blinks.Stop(b))
+        {
+            _blinkHome.Remove(b); UpdateRows();
+            Run(async () => { await Send(h, b, new Cmd.Identify(false)); SetStatus($"Stopped blinking {b.Name}"); });
+            return;
+        }
+        var token = _blinks.Start(b); _blinkHome[b] = h; UpdateRows();
+        Run(async () =>
+        {
+            try { await Send(h, b, new Cmd.Identify(true)); }
+            catch (Exception ex)
+            {
+                if (_blinks.IsActive(b) && !token.IsCancellationRequested) { _blinks.Stop(b); _blinkHome.Remove(b); }
+                throw new IOException($"{b.Name}: not reachable ({ex.Message})", ex);
+            }
+            if (!token.IsCancellationRequested) SetStatus($"Blinking {b.Name}… click ◎ again to stop");
+            try { await Task.Delay(5000, token); } catch (OperationCanceledException) { return; }
+            if (_blinks.Expire(b, token)) { _blinkHome.Remove(b); UpdateRows(); await Send(h, b, new Cmd.Identify(false)); SetStatus($"Stopped blinking {b.Name}"); }
+        });
     }
 
     // ---------------- connections ----------------
@@ -129,6 +167,7 @@ public sealed class MainWindow : Window
     async Task Send(Home h, Bulb b, Cmd c)
     {
         await _router.SendAsync(h, b, c);
+        if (c is Cmd.Identify) return; // identify does not change on/brightness/color
         var st = b.State ?? new BulbState(b.MeshId, true, false, 50, 50, (0, 0, 0));
         b.State = c switch
         {
@@ -223,6 +262,7 @@ public sealed class MainWindow : Window
     sealed class BulbRow
     {
         public readonly StackPanel Root = new() { Margin = new Thickness(0, 4, 0, 2) };
+        readonly MainWindow _w; readonly Button _find;
         readonly Bulb _b; readonly CheckBox _sw; readonly Slider? _bri, _ct; readonly TextBlock _via = new() { FontSize = 10, Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         readonly Border _viaBox; readonly Border _dot = new() { Width = 10, Height = 10, CornerRadius = new CornerRadius(5), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
 
@@ -237,19 +277,11 @@ public sealed class MainWindow : Window
             DockPanel.SetDock(_viaBox, Dock.Right); line.Children.Add(_viaBox);
             var more = new Button { Content = "⋯", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Color", Visibility = b.Caps.HasFlag(Caps.Temp) || b.Caps.HasFlag(Caps.Color) ? Visibility.Visible : Visibility.Collapsed };
             DockPanel.SetDock(more, Dock.Right); line.Children.Add(more);
-            var find = new Button { Content = "◎", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Find this bulb (blinks)" };
-            int blink = 0; // 0 = idle; otherwise the id of the running blink
-            find.Click += (_, _) =>
-            {
-                if (blink != 0) { blink = 0; w.Run(() => w.Send(h, b, new Cmd.Identify(false))); return; }
-                var id = blink = Environment.TickCount | 1;
-                w.Run(async () =>
-                {
-                    await w.Send(h, b, new Cmd.Identify(true));
-                    await Task.Delay(5000);
-                    if (blink == id) { blink = 0; await w.Send(h, b, new Cmd.Identify(false)); }
-                });
-            };
+            _w = w;
+            _find = new Button { Content = "◎", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0), ToolTip = "Find this bulb (blinks)" };
+            System.Windows.Automation.AutomationProperties.SetName(_find, "Find this bulb: " + b.Name);
+            _find.Click += (_, _) => w.ToggleBlink(h, b);
+            var find = _find;
             DockPanel.SetDock(find, Dock.Right); line.Children.Add(find);
             DockPanel.SetDock(_dot, Dock.Left); line.Children.Add(_dot);
             line.Children.Add(new TextBlock { Text = b.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -296,6 +328,11 @@ public sealed class MainWindow : Window
         public void Update()
         {
             var s = _b.State;
+            var blinking = _w._blinks.IsActive(_b);
+            _find.Foreground = blinking ? Br("AccentFg") : Br("Fg");
+            _find.Background = blinking ? Br("Accent") : Br("Ctl");
+            _find.ToolTip = blinking ? "Stop blinking" : "Find this bulb (blinks)";
+            System.Windows.Automation.AutomationProperties.SetName(_find, (blinking ? "Stop blinking: " : "Find this bulb: ") + _b.Name);
             _sw.IsChecked = s?.On == true;
             if (_bri != null && s != null) { _bri.Tag = "sync"; _bri.Value = Math.Max(1, s.Brightness); _bri.Tag = null; }
             if (_ct != null && s is { Mode: <= 100 }) { _ct.Tag = "sync"; _ct.Value = s.Mode; _ct.Tag = null; }

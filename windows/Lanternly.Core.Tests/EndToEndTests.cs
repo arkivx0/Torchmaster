@@ -102,6 +102,39 @@ public class EndToEndTests
         Assert.Equal(0x05, p[10]); Assert.Equal(80, p[11]);
     }
 
+    sealed class SlowGatt(IGatt inner) : IGatt
+    {
+        public readonly List<string> Log = []; int _busy, _n;
+        public string Mac => inner.Mac;
+        public async Task WriteAsync(Guid ch, byte[] data, bool withResponse)
+        {
+            if (ch != Ble.CommandChar) { await inner.WriteAsync(ch, data, withResponse); return; }
+            if (Interlocked.Increment(ref _busy) > 1) Log.Add("overlap");
+            var n = ++_n; Log.Add("begin" + n);
+            await Task.Delay(n == 1 ? 150 : 1); // first write (the start) is slow
+            await inner.WriteAsync(ch, data, withResponse);
+            Log.Add("end" + n); Interlocked.Decrement(ref _busy);
+        }
+        public Task<byte[]> ReadAsync(Guid ch) => inner.ReadAsync(ch);
+        public Task SubscribeAsync(Guid ch, Action<byte[]> f) => inner.SubscribeAsync(ch, f);
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
+    [Fact] // a quick second tap must not let the stop overtake a slow start write
+    public async Task ConcurrentSendsAreSerializedInOrder()
+    {
+        var home = MakeHome();
+        var node = new FakeNode(home.Bulbs[0].Mac, home.MeshName, home.MeshPassword);
+        var slow = new SlowGatt(node);
+        await using var ble = new BleSession(slow, home);
+        await ble.LoginAsync();
+        var start = ble.SendAsync(home, home.Bulbs[1], new Cmd.Identify(true));
+        var stop = ble.SendAsync(home, home.Bulbs[1], new Cmd.Identify(false));
+        await Task.WhenAll(start, stop);
+        Assert.Equal(["begin1", "end1", "begin2", "end2"], slow.Log);
+        Assert.Equal(0x01, node.Plain[0][11]); Assert.Equal(0x02, node.Plain[1][11]);
+    }
+
     [Fact]
     public async Task IdentifyStartAndStopReachTheNodeAsF7()
     {

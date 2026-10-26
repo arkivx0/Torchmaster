@@ -3,7 +3,13 @@
 ## 0.1.2 (unreleased)
 - "Find this bulb": a per-bulb button makes the bulb blink (BLE identify command); it stops after a few seconds
   or on a second tap.
-- New "Red" quick scene (color bulbs turn red; other bulbs just turn on).
+- New "Red" quick scene: power on, full brightness, red (bulbs without color just turn on at full brightness).
+- Find button fixes (review): blink state is kept per window/activity, so rebuilding the list no longer turns the
+  next tap into a second start; rotating, leaving or quitting the app mid-blink sends the stop first (Android no
+  longer crashes); a failed start resets the button; the button shows when a bulb is blinking, with status text and
+  an accessible name; find no longer marks a bulb with unknown state as on.
+- Windows: BLE command writes are serialized, so a stop can't overtake its start.
+- Android: bulb commands run on their own queue, so scanning or adding bulbs no longer delays them; buttons are 48 dp.
 - Privacy notes: how Lanternly differs from the vendor app, and why it is Bluetooth-only.
 - More offline regression tests (both platforms): vendor cloud names, vendor LAN markers, networking APIs and
   the INTERNET permission fail the build. New test pins the identify command bytes.

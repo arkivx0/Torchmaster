@@ -60,9 +60,10 @@ class ProtocolTest {
 
     @Test fun redScene() {
         val red = Scenes.all.first { it.name == "Red" }
-        assertEquals(listOf(Cmd.Power(true), Cmd.Rgb(255, 0, 0)), red.steps)
-        assertEquals(listOf(Cmd.Power(true)), Scenes.stepsFor(red, Bulb("W", 2, 99999, "AA:BB:CC:DD:EE:03")))
-        assertEquals(2, Scenes.stepsFor(red, Bulb("C", 2, 6, "AA:BB:CC:DD:EE:04")).size)
+        assertEquals(listOf(Cmd.Power(true), Cmd.Brightness(100), Cmd.Rgb(255, 0, 0)), red.steps)
+        val w = Scenes.stepsFor(red, Bulb("W", 2, 99999, "AA:BB:CC:DD:EE:03"))
+        assertEquals(Cmd.Power(true), w.first()); assertTrue(w.none { it is Cmd.Rgb })
+        assertEquals(listOf(Cmd.Power(true), Cmd.Brightness(100), Cmd.Rgb(255, 0, 0)), Scenes.stepsFor(red, Bulb("C", 2, 6, "AA:BB:CC:DD:EE:04")))
     }
 
     @Test fun colorTempZeroIsClampedToOne() = assertEquals(1, Ble.colorTempData(0)[1].toInt())
