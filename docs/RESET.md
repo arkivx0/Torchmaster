@@ -15,7 +15,9 @@ Source: GE Cync support article "Resetting Cync Light Bulbs" (Bluetooth + Direct
 ## Reset from Lanternly (no power-cycling)
 If Lanternly already has the bulb's mesh key (you added it in Lanternly, or imported a key file with that
 home's mesh name and password), it can reset the bulb over Bluetooth: ⋯ next to the bulb → **Reset bulb…** → confirm
-twice. The bulb is removed from the home. Then use **Add a reset bulb → Find reset bulbs** to add it fresh.
+twice. Lanternly then checks for about 10 s that the bulb restarted as a reset bulb; if so it is removed from the
+home together with any schedule for that bulb alone (if not, you choose Keep or Remove anyway). Bulbs with a group
+address, or sharing an address with another bulb, can't be reset this way. Then use **Add a reset bulb → Find reset bulbs** to add it fresh.
 This sends the Telink kick-out command (see spec/PROTOCOL.md). Bulbs still on a Cync account whose key Lanternly
 doesn't have can only be reset by power-cycling.
 

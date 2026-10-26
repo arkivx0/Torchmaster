@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.5 (unreleased, Android versionCode 7)
+Reset bulb fixes from the 0.1.4 review:
+- **A reset bulb's own schedules are deleted** (schedules whose target is that bulb alone, in that home), with their
+  alarms (Android) and last-run records (Windows). Before, they stayed behind as "(removed bulb)" and would have
+  controlled a later bulb that got the same mesh address. Room and "All bulbs" schedules are kept.
+- **Reset is refused** when the bulb's mesh address isn't a single bulb's address (it must be 1 to 0x7FFF; 0 means
+  "unknown", 0x8000 and up are groups, and 0xFFFF would reach every bulb), or when another bulb in the home has the
+  same address (both would be erased). Nothing is sent and a clear message explains why.
+- **Key-file import checks addresses:** a file with a bulb or room address above 0x7FFF, or two bulbs of one home
+  on the same address, is rejected ("Could not import: …"). 0 (address not learned yet) is still accepted.
+- **The reset is confirmed before the bulb is removed.** The bulb doesn't acknowledge the command, so after sending it
+  Lanternly listens for about 10 s for that bulb's factory-reset advertisement (`telink_mesh1`). If it's seen, the bulb
+  and its own schedules are removed. If not, it asks: **Keep** (nothing removed; try again closer) or **Remove anyway**.
+- Android: the bulb list is changed only on the UI thread after a reset (before, it was changed on the Bluetooth
+  thread while the screen could be drawing it).
+
 ## 0.1.4 (unreleased, Android versionCode 6)
 - **Reset bulb…** (per bulb, under ⋯): factory resets a bulb whose mesh key Lanternly has, over Bluetooth, for bulbs
   that won't reset by power-cycling. Sends the Telink kick-out command (`E3 11 02 01`, the same bytes as the official

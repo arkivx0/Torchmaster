@@ -60,7 +60,9 @@ class ProtocolTest {
         val h = home(); h.rooms = listOf(Room(9, "R", listOf(h.bulbs[0].meshId, h.bulbs[1].meshId)))
         val target = h.bulbs[0]; val node = FakeNode(target.mac, h.meshName, h.meshPassword)
         val s = BleSession(node, h); s.login()
-        BulbReset.reset(Router(listOf(s)), h, target)
+        BulbReset.send(Router(listOf(s)), h, target)
+        assertTrue(h.bulbs.contains(target)) // not forgotten until confirmed
+        BulbReset.forget(h, target)
         assertEquals("e3110201000000000000", hex(node.plain[0].copyOfRange(7, 17)))
         assertEquals(target.meshId, (node.plain[0][5].toInt() and 0xff) or ((node.plain[0][6].toInt() and 0xff) shl 8))
         assertTrue(node.kicked >= 1); assertFalse(h.bulbs.contains(target)); assertFalse(target.meshId in h.rooms[0].meshIds)
@@ -71,8 +73,55 @@ class ProtocolTest {
         assertEquals(Via.BLE, Router(listOf(s2)).send(fresh, fresh.bulbs[0], Cmd.Power(true)))
         // not sent: nothing removed
         val h2 = home(); val b2 = h2.bulbs[0]
-        assertThrows(Exception::class.java) { BulbReset.reset(Router(emptyList()), h2, b2) }
+        assertThrows(Exception::class.java) { BulbReset.send(Router(emptyList()), h2, b2) }
         assertTrue(h2.bulbs.contains(b2))
+    }
+
+    /** R2: never reset a group/broadcast/unknown address, or one shared by two bulbs; nothing is sent. */
+    @Test fun resetRefusesBadOrSharedAddress() {
+        for (a in listOf(0, 0x8000, 0xFFFF)) {
+            val h = home(); h.bulbs[0].meshId = a
+            val node = FakeNode(h.bulbs[1].mac, h.meshName, h.meshPassword); val s = BleSession(node, h); s.login()
+            assertNotNull(BulbReset.refuseReason(h, h.bulbs[0]))
+            assertThrows(IllegalArgumentException::class.java) { BulbReset.send(Router(listOf(s)), h, h.bulbs[0]) }
+            assertEquals(0, node.kicked); assertTrue(node.plain.none { it.size > 7 && (it[7].toInt() and 0xff) == Ble.CMD_KICK_OUT })
+        }
+        val h = home(); h.bulbs[1].meshId = h.bulbs[0].meshId
+        assertNotNull(BulbReset.refuseReason(h, h.bulbs[0]))
+        assertThrows(IllegalArgumentException::class.java) { BulbReset.send(Router(emptyList()), h, h.bulbs[0]) }
+        assertNull(BulbReset.refuseReason(home(), home().bulbs[0])); assertTrue(BulbReset.validAddress(0x7FFF))
+    }
+
+    /** R1: the bulb's own schedules go with it (same home, exact target); others stay. */
+    @Test fun resetDeletesOnlyThatBulbsSchedules() {
+        val h = home(); val b = h.bulbs[0]
+        val mine = Schedule(1, true, 7, 0, 127, "on", h.id, "bulb:${b.meshId}")
+        val l = listOf(mine, Schedule(2, true, 7, 0, 127, "on", h.id, "bulb:3"), Schedule(3, true, 7, 0, 127, "on", h.id, "room:1"),
+            Schedule(4, true, 7, 0, 127, "on", h.id, "all"), Schedule(5, true, 7, 0, 127, "on", 999, "bulb:${b.meshId}"), Schedule(6, true, 7, 0, 127, "on", h.id, "bulb:${b.meshId}0"))
+        assertEquals(listOf(mine), BulbReset.schedulesFor(h, b, l))
+        // a later bulb with the same address is not targeted by what is left
+        BulbReset.forget(h, b); val left = l - BulbReset.schedulesFor(h, b, l).toSet()
+        h.bulbs.add(Bulb("New", b.meshId, 6, "AA:BB:CC:DD:EE:09"))
+        assertTrue(left.filter { it.homeId == h.id && it.target.startsWith("bulb:") }.none { Schedules.targets(h, it).any { x -> x.name == "New" } })
+    }
+
+    /** R3: confirmed only when the bulb's own MAC advertises telink_mesh1. */
+    @Test fun resetConfirmedOnlyByOwnFactoryAdvert() {
+        val b = home().bulbs[0]
+        assertTrue(BulbReset.confirmed(b, listOf("AA:BB:CC:DD:EE:07", "aa:bb:cc:dd:ee:01")))
+        assertFalse(BulbReset.confirmed(b, listOf("AA:BB:CC:DD:EE:02"))); assertFalse(BulbReset.confirmed(b, emptyList()))
+        assertFalse(BulbReset.confirmed(Bulb("x", 2, 6, ""), listOf("")))
+    }
+
+    /** Key-file import rejects group/broadcast addresses and duplicates; 0 (unknown) is allowed. */
+    @Test fun importValidatesAddresses() {
+        fun file(vararg ids: Int, room: Int = 2) = Vault(listOf(Home(1, "H", "n", "p", listOf(Room(1, "R", listOf(room))),
+            ids.mapIndexed { i, m -> Bulb("B$i", m, 6, "AA:BB:CC:DD:EE:0$i") }.toMutableList()))).toJson()
+        assertEquals(2, KeyFile.import(file(2, 3), null).homes[0].bulbs.size)
+        assertEquals(2, KeyFile.import(file(0, 0), null).homes[0].bulbs.size)
+        for (bad in listOf(file(2, 0xFFFF), file(2, 0x8000), file(2, -1), file(2, 2), file(2, 3, room = 0xFFFF)))
+            assertThrows(IllegalArgumentException::class.java) { KeyFile.import(bad, null) }
+        assertThrows(IllegalArgumentException::class.java) { KeyFile.import(KeyFile.export(Vault.fromJson(file(5, 0xFFFF)), "pw"), "pw") }
     }
 
     /** Identify / blink, as in the official app: F7 11 02 03 01 (start) / 03 02 (stop). */

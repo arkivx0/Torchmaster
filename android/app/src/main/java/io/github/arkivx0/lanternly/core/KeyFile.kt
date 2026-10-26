@@ -39,7 +39,7 @@ object KeyFile {
     class WrongPassphrase(msg: String) : Exception(msg)
 
     fun import(text: String, passphrase: String?): Vault {
-        if (!isProtected(text)) return Vault.fromJson(text)
+        if (!isProtected(text)) return Vault.fromJson(text).also(BulbReset::checkImport)
         if (passphrase.isNullOrEmpty()) throw WrongPassphrase("This key file is protected with a passphrase.")
         val o = JSONObject(text); val it = o.getInt("iterations")
         require(it in 100_000..10_000_000) { "bad iteration count" }
@@ -47,6 +47,6 @@ object KeyFile {
         require(blob.size >= 16 && nonce.size == 12) { "truncated key file" }
         val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, derive(passphrase, salt, it), GCMParameterSpec(128, nonce)); updateAAD(MAGIC.toByteArray()) }
         val pt = try { c.doFinal(blob) } catch (_: AEADBadTagException) { throw WrongPassphrase("Wrong passphrase, or the file was changed.") }
-        return Vault.fromJson(String(pt, Charsets.UTF_8))
+        return Vault.fromJson(String(pt, Charsets.UTF_8)).also(BulbReset::checkImport)
     }
 }

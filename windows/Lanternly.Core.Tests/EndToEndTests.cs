@@ -181,8 +181,10 @@ public class EndToEndTests
         await using (var ble = new BleSession(node, home))
         {
             await ble.LoginAsync();
-            await BulbReset.ResetAsync(new Router([ble]), home, target);
+            await BulbReset.SendAsync(new Router([ble]), home, target);
         }
+        Assert.Contains(target, home.Bulbs); // not forgotten until confirmed
+        BulbReset.Forget(home, target);
         Assert.Equal($"e31102{Ble.KickOutFactoryReset:x2}000000000000", Convert.ToHexString(node.Plain[0][7..17]).ToLowerInvariant());
         Assert.Equal(target.MeshId, (ushort)(node.Plain[0][5] | node.Plain[0][6] << 8));
         Assert.True(node.KickedOut >= 1);
@@ -201,8 +203,67 @@ public class EndToEndTests
     public async Task ResetBulbKeepsBulbWhenNotSent()
     {
         var home = MakeHome(); var b = home.Bulbs[0];
-        await Assert.ThrowsAnyAsync<Exception>(() => BulbReset.ResetAsync(new Router([]), home, b));
+        await Assert.ThrowsAnyAsync<Exception>(() => BulbReset.SendAsync(new Router([]), home, b));
         Assert.Contains(b, home.Bulbs);
+    }
+
+    [Theory] // R2: never reset a group/broadcast/unknown address; nothing is sent
+    [InlineData(0)] [InlineData(0x8000)] [InlineData(0xFFFF)]
+    public async Task ResetRefusesGroupOrUnknownAddress(int addr)
+    {
+        var home = MakeHome(); home.Bulbs[0].MeshId = (ushort)addr;
+        var node = new FakeNode(home.Bulbs[1].Mac, home.MeshName, home.MeshPassword);
+        await using var ble = new BleSession(node, home); await ble.LoginAsync();
+        Assert.NotNull(BulbReset.RefuseReason(home, home.Bulbs[0]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BulbReset.SendAsync(new Router([ble]), home, home.Bulbs[0]));
+        Assert.Equal(0, node.KickedOut);
+        Assert.DoesNotContain(node.Plain, p => p.Length > 7 && p[7] == Ble.CmdKickOut);
+    }
+
+    [Fact] // R2: two bulbs on one address would both be erased
+    public async Task ResetRefusesSharedAddress()
+    {
+        var home = MakeHome(); home.Bulbs[1].MeshId = home.Bulbs[0].MeshId;
+        Assert.NotNull(BulbReset.RefuseReason(home, home.Bulbs[0]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BulbReset.SendAsync(new Router([]), home, home.Bulbs[0]));
+        Assert.Null(BulbReset.RefuseReason(MakeHome(), MakeHome().Bulbs[0]));
+        Assert.True(BulbReset.ValidAddress(0x7FFF));
+    }
+
+    [Fact] // R1: the bulb's own schedules go with it (same home, exact target); others stay
+    public void ResetDeletesOnlyThatBulbsSchedules()
+    {
+        var home = MakeHome(); var b = home.Bulbs[0];
+        Schedule S(long id, long hid, string t) => new() { Id = id, Enabled = true, Hour = 7, Days = 127, Action = "on", HomeId = hid, Target = t };
+        var mine = S(1, home.Id, $"bulb:{b.MeshId}");
+        var all = new List<Schedule> { mine, S(2, home.Id, "bulb:3"), S(3, home.Id, "room:1"), S(4, home.Id, "all"), S(5, 999, $"bulb:{b.MeshId}"), S(6, home.Id, $"bulb:{b.MeshId}0") };
+        Assert.Equal([mine], BulbReset.SchedulesFor(home, b, all));
+        var gone = BulbReset.SchedulesFor(home, b, all); BulbReset.Forget(home, b); all.RemoveAll(gone.Contains);
+        home.Bulbs.Add(new Bulb { Name = "New", MeshId = b.MeshId, Type = 6, Mac = "AA:BB:CC:DD:EE:09" });
+        Assert.DoesNotContain(all.Where(s => s.HomeId == home.Id && s.Target.StartsWith("bulb:")), s => Schedules.Targets(home, s).Any(x => x.Name == "New"));
+    }
+
+    [Fact] // R3: confirmed only when the bulb's own MAC advertises telink_mesh1
+    public void ResetConfirmedOnlyByOwnFactoryAdvert()
+    {
+        var b = MakeHome().Bulbs[0];
+        Assert.True(BulbReset.Confirmed(b, ["AA:BB:CC:DD:EE:07", "aa:bb:cc:dd:ee:01"]));
+        Assert.False(BulbReset.Confirmed(b, ["AA:BB:CC:DD:EE:02"]));
+        Assert.False(BulbReset.Confirmed(b, []));
+        Assert.False(BulbReset.Confirmed(new Bulb { Mac = "" }, [""]));
+    }
+
+    [Fact] // key-file import rejects group/broadcast addresses and duplicates; 0 (unknown) is allowed
+    public void ImportValidatesAddresses()
+    {
+        static string File(int room, params int[] ids) => new Vault { Homes = [new Home { Id = 1, Name = "H", MeshName = "n", MeshPassword = "p",
+            Rooms = [new Room { Id = 1, Name = "R", MeshIds = [(ushort)room] }],
+            Bulbs = ids.Select((m, i) => new Bulb { Name = $"B{i}", MeshId = (ushort)m, Type = 6, Mac = $"AA:BB:CC:DD:EE:0{i}" }).ToList() }] }.ToJson();
+        Assert.Equal(2, KeyFile.Import(File(2, 2, 3), null).Homes[0].Bulbs.Count);
+        Assert.Equal(2, KeyFile.Import(File(2, 0, 0), null).Homes[0].Bulbs.Count);
+        foreach (var bad in new[] { File(2, 2, 0xFFFF), File(2, 2, 0x8000), File(2, 2, 2), File(0xFFFF, 2, 3) })
+            Assert.Throws<InvalidDataException>(() => KeyFile.Import(bad, null));
+        Assert.Throws<InvalidDataException>(() => KeyFile.Import(KeyFile.Export(Vault.FromJson(File(2, 5, 0xFFFF)), "pw"), "pw"));
     }
 
     [Fact]

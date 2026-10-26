@@ -213,6 +213,7 @@ class MainActivity : Activity() {
 
     // ---------- reset bulb (factory reset over BLE) ----------
     private fun resetBulb(h: Home, b: Bulb) {
+        BulbReset.refuseReason(h, b)?.let { AlertDialog.Builder(this).setTitle("Can't reset this bulb").setMessage(it).setPositiveButton("OK", null).show(); return }
         AlertDialog.Builder(this).setTitle(BulbReset.CONFIRM_TITLE).setMessage(BulbReset.confirmText(b))
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Continue") { _, _ ->
@@ -228,18 +229,41 @@ class MainActivity : Activity() {
         setStatus("Resetting ${b.name}…")
         blinks.stop(b)
         try { cmdIo.execute {
-            val err = try { BulbReset.reset(router, h, b); null } catch (e: Exception) { Diag.log("reset bulb", e); "${b.name}: reset not sent (${e.message}). Nothing was removed." }
+            val err = try { BulbReset.send(router, h, b); null } catch (e: Exception) { Diag.log("reset bulb", e); "${b.name}: reset not sent (${e.message}). Nothing was removed." }
             if (closing) return@execute
-            post {
-                if (err != null) { setStatus(err); refresh(); return@post }
-                save()
-                AlertDialog.Builder(this).setTitle("Bulb reset").setMessage(BulbReset.DONE)
-                    .setPositiveButton("Add a bulb") { _, _ -> settingsOpen = true; schedulesOpen = false; render() }
-                    .setNegativeButton("Later", null).show()
-                render(); connect() // the reset bulb may have been our connection
-                setStatus(BulbReset.DONE)
+            if (err != null) { post { setStatus(err); refresh() }; return@execute }
+            post { setStatus("Reset sent. Checking that ${b.name} restarted (${BulbReset.CONFIRM_SCAN_MS / 1000} s)…") }
+            val seen = try { BulbReset.confirmed(b, AndroidGatt.findResetBulbs(this, BulbReset.CONFIRM_SCAN_MS)) } catch (e: Exception) { Diag.log("reset confirm scan", e); false }
+            if (closing) return@execute
+            post { // list changes only on the UI thread (render/refreshers iterate h.bulbs)
+                if (seen) { finishReset(h, b); showResetDone() }
+                else AlertDialog.Builder(this).setTitle(BulbReset.UNCONFIRMED_TITLE).setMessage(BulbReset.unconfirmedText(b)).setCancelable(false)
+                    .setPositiveButton("Keep") { _, _ -> setStatus("${b.name} was kept. Nothing was removed."); refresh() }
+                    .setNegativeButton("Remove anyway") { _, _ -> finishReset(h, b); setStatus("${b.name} was removed.") }.show()
             }
         } } catch (e: RejectedExecutionException) { Diag.log("reset after close", e) }
+    }
+
+    /** UI thread. Forgets the bulb and deletes the schedules that controlled only it. */
+    private fun finishReset(h: Home, b: Bulb) {
+        val gone = BulbReset.schedulesFor(h, b, schedules)
+        BulbReset.forget(h, b)
+        save()
+        if (gone.isNotEmpty()) {
+            val ids = gone.map { it.id }.toSet(); val l = schedules.filter { it.id !in ids }; schedules = l
+            io.execute {
+                try { store.saveSchedules(l) } catch (e: Exception) { Diag.log("schedules save", e); post { setStatus("Schedules not saved: ${e.message}") } }
+                gone.forEach { Alarms.remove(applicationContext, it.id) }
+            }
+        }
+        render(); connect() // the reset bulb may have been our connection
+    }
+
+    private fun showResetDone() {
+        AlertDialog.Builder(this).setTitle("Bulb reset").setMessage(BulbReset.DONE)
+            .setPositiveButton("Add a bulb") { _, _ -> settingsOpen = true; schedulesOpen = false; render() }
+            .setNegativeButton("Later", null).show()
+        setStatus(BulbReset.DONE)
     }
 
     // ---------- UI ----------
@@ -355,7 +379,7 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.4 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Lanternly 0.1.5 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("Forget everything") {
             AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()

@@ -81,8 +81,8 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
 1. Make sure the bulb can be controlled first: on/off works and the status shows "BLE ✓".
 2. ⋯ next to the bulb → **Reset bulb…** → read the warning → Continue → **Erase pairing** (Windows: OK, then Yes).
    Cancelling at either step must change nothing.
-3. Expect the status line "Reset sent…" and a dialog that points to Add a reset bulb. The bulb disappears from the
-   list and from its room. Note what the bulb does (blinks, how many times, turns off or on).
+3. Expect "Reset sent. Checking…", then (0.1.5) a "Reset confirmed" dialog that points to Add a reset bulb. The bulb
+   disappears from the list and from its room. Note what the bulb does (blinks, how many times, turns off or on).
 4. Within about 10 s: ⚙ → Add a reset bulb → **Find reset bulbs**. Expect the bulb to be found and "Added 1 of 1 bulb(s)".
    If nothing is found, wait 30 s and try once more, then note it. Turning the bulb off and on once at the switch is
    fine at this point.
@@ -90,6 +90,18 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
 6. Negative check: with Bluetooth off (or the bulb out of range), Reset bulb… reports "reset not sent … Nothing was
    removed" and the bulb stays in the list.
 7. Android 13+: on a fresh install, the app asks for notifications once. Deny it: schedules still run.
+
+## H. Reset bulb fixes (0.1.5)
+1. Give the bulb its own schedule (target: that bulb) plus one room schedule. Reset it as in F. Expect "Checking that
+   … restarted (10 s)…", then the "Reset confirmed" dialog. The bulb's own schedule is gone from the list; the room
+   schedule stays. Android: no stray alarm fires at the deleted schedule's time.
+2. Re-add the bulb (it may get the same mesh address). Check that no old schedule controls it.
+3. Unconfirmed path: start a reset with the bulb just at the edge of range (or switch it off at the wall right after
+   tapping Erase pairing). Expect "Couldn't confirm the reset" with **Keep** / **Remove anyway** (Windows: Yes = Keep,
+   No = Remove anyway). Keep must leave the bulb and its schedules; Remove anyway removes both.
+4. Edit a key-file copy so one bulb has `"MeshId": 65535`, import it: expect "Could not import: … invalid mesh
+   address". Restore the good key file afterwards.
+5. Note how long the bulb took to show up as `telink_mesh1` after the reset (if it took more than 10 s, report it).
 
 ## G. 0.1.4 schedule fixes
 1. Android 12+: revoke Nearby devices (Bluetooth) for Lanternly, then let a schedule fire: "Last run" says

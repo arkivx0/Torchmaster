@@ -288,6 +288,7 @@ public sealed class MainWindow : Window
     // ---------------- reset bulb (factory reset over BLE) ----------------
     void ResetBulb(Home h, Bulb b)
     {
+        if (BulbReset.RefuseReason(h, b) is { } why) { MessageBox.Show(this, why, "Can't reset this bulb", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         if (MessageBox.Show(this, BulbReset.ConfirmText(b), BulbReset.ConfirmTitle, MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         if (MessageBox.Show(this, $"Last check: erase the pairing of \"{b.Name}\" now? This cannot be undone.", BulbReset.ConfirmTitle, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         Run(async () =>
@@ -299,10 +300,19 @@ public sealed class MainWindow : Window
                 SetStatus($"Resetting {b.Name}…");
                 if (_ble?.LoggedIn != true) await Reconnect();
                 _blinks.Stop(b); _blinkHome.Remove(b);
-                try { await BulbReset.ResetAsync(_router, h, b); }
+                try { await BulbReset.SendAsync(_router, h, b); }
                 catch (Exception ex) { throw new IOException($"{b.Name}: reset not sent ({ex.Message}). Nothing was removed.", ex); }
-                Save();
+                SetStatus($"Reset sent. Checking that {b.Name} restarted ({BulbReset.ConfirmScan.TotalSeconds:0} s)…");
+                bool seen;
+                try { seen = BulbReset.Confirmed(b, await WinGatt.FindResetBulbsAsync(BulbReset.ConfirmScan)); }
+                catch (Exception ex) { Program.Log(ex, "reset confirm scan"); seen = false; }
+                if (!seen && MessageBox.Show(this, BulbReset.UnconfirmedText(b), BulbReset.UnconfirmedTitle, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.Yes) != MessageBoxResult.No)
+                { SetStatus($"{b.Name} was kept. Nothing was removed."); Render(); return; }
+                foreach (var s in BulbReset.SchedulesFor(h, b, _schedules)) { _schedules.Remove(s); _set.LastFired.Remove(s.Id); _due.Remove(s.Id); }
+                BulbReset.Forget(h, b);
+                Save(); SaveSchedules(); Replan();
                 await Reconnect(); // the reset bulb may have been our connection
+                if (!seen) { SetStatus($"{b.Name} was removed."); Render(); return; }
                 SetStatus(BulbReset.Done);
                 MessageBox.Show(this, BulbReset.Done, "Bulb reset", MessageBoxButton.OK, MessageBoxImage.Information);
                 _settingsOpen = true; _schedulesOpen = false; Render();
@@ -587,7 +597,7 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.4 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        about.Children.Add(Note("Lanternly 0.1.5 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "Forget everything", HorizontalAlignment = HorizontalAlignment.Left };
         forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);

@@ -38,7 +38,7 @@ public static class KeyFile
     /// <summary>Reads a plain or protected key file. Wrong passphrase → CryptographicException.</summary>
     public static Vault Import(string text, string? passphrase)
     {
-        if (!IsProtected(text)) return Vault.FromJson(text);
+        if (!IsProtected(text)) return Checked(Vault.FromJson(text));
         if (string.IsNullOrEmpty(passphrase)) throw new CryptographicException("This key file is protected with a passphrase.");
         var o = JsonNode.Parse(text)!;
         int it = o["iterations"]!.GetValue<int>();
@@ -51,6 +51,8 @@ public static class KeyFile
         try { using var g = new AesGcm(key, 16); g.Decrypt(nonce, blob.AsSpan(0, pt.Length), blob.AsSpan(pt.Length), pt, Encoding.ASCII.GetBytes(Magic)); }
         catch (AuthenticationTagMismatchException) { throw new CryptographicException("Wrong passphrase, or the file was changed."); }
         finally { CryptographicOperations.ZeroMemory(key); }
-        return Vault.FromJson(Encoding.UTF8.GetString(pt));
+        return Checked(Vault.FromJson(Encoding.UTF8.GetString(pt)));
     }
+
+    static Vault Checked(Vault v) { BulbReset.CheckImport(v); return v; }
 }
