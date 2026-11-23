@@ -1,11 +1,11 @@
 # Privacy
 
-Lanternly has no analytics, telemetry, ads, accounts or crash upload.
+Torchmaster has no analytics, telemetry, ads, accounts or crash upload.
 
-- **Network: none.** Lanternly never connects to GE, Savant, Cync or any other server. The Android app does not
+- **Network: none.** Torchmaster never connects to GE, Savant, Cync or any other server. The Android app does not
   request the INTERNET permission. The only radio it uses is Bluetooth, to talk to your bulbs.
 - The official vendor app signs in to an account, stores the account password on the phone and keeps a cloud
-  connection open. Lanternly has no account and uses no network.
+  connection open. Torchmaster has no account and uses no network.
 - Why Bluetooth only, not local Wi-Fi: the vendor's local Wi-Fi control still needs device keys issued by its cloud.
 - Stored data (homes, rooms, bulbs, mesh keys) is encrypted: Android Keystore (AES-GCM, AtomicFile) / Windows DPAPI
   (current user). The Android vault is excluded from backups. If the stored data cannot be read it is moved aside

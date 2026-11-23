@@ -1,4 +1,4 @@
-# Generates the Lanternly icon: a lantern glow on a Tokyo Night background. No fonts used.
+# Generates the Torchmaster icon: a lantern glow on a Tokyo Night background. No fonts used.
 from PIL import Image, ImageDraw, ImageFilter
 BG=(26,27,38,255); GLOW=(224,175,104,255); FRAME=(122,162,247,255); S=1024
 

@@ -77,12 +77,12 @@ class MainActivity : Activity() {
         vaultWarnings = BulbReset.addressWarnings(vault) // shown in settings; nothing is changed
         schedules = if (demo) emptyList() else store.loadSchedules() // never throws: bad entries skipped, unreadable file quarantined
         if (!demo) Thread { try { Alarms.planAll(applicationContext, schedules) } catch (e: Throwable) { Diag.log("plan schedules", e) } }.start() // must never crash launch
-        Diag.sink = { where, e -> android.util.Log.w("Lanternly", where + (e?.let { ": " + it.javaClass.simpleName } ?: "")) }
+        Diag.sink = { where, e -> android.util.Log.w("Torchmaster", where + (e?.let { ": " + it.javaClass.simpleName } ?: "")) }
         window.statusBarColor = BG; window.navigationBarColor = BG
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG); fitsSystemWindows = true }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(12), dp(12), dp(6)) }
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(text("Lanternly", 20f, FG, bold = true))
+        titles.addView(text("Torchmaster", 20f, FG, bold = true))
         status = text("", 13f, DIM).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }; titles.addView(status)
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(top)
@@ -109,7 +109,7 @@ class MainActivity : Activity() {
         render()
         store.quarantined?.let { q ->
             AlertDialog.Builder(this).setTitle("Stored keys unreadable")
-                .setMessage("Lanternly could not read its stored keys, so it moved them aside ($q). Nothing will be saved until you import a key file or choose Forget everything. Your bulbs are not affected.")
+                .setMessage("Torchmaster could not read its stored keys, so it moved them aside ($q). Nothing will be saved until you import a key file or choose Forget everything. Your bulbs are not affected.")
                 .setPositiveButton("OK", null).show()
         }
         if (!demo) ensurePermsThenConnect() else { router = Router(listOf(DemoLink())); setStatus("Demo · sample data") ; vault.homes.flatMap { it.bulbs }.forEach { it.via = Via.BLE }; render() }
@@ -221,7 +221,7 @@ class MainActivity : Activity() {
     }
 
     // ---------- light shows ----------
-    /** Effects picker for one bulb, a room or all bulbs. Native shows run in the bulb; app-side ones need Lanternly open. */
+    /** Effects picker for one bulb, a room or all bulbs. Native shows run in the bulb; app-side ones need Torchmaster open. */
     private fun effectsPicker(h: Home, title: String, bulbs: List<Bulb>) {
         val ok = bulbs.filter { it.addressKnown }
         val color = ok.filter { Effects.supports(it) }
@@ -232,7 +232,7 @@ class MainActivity : Activity() {
             if (r.ok > 0) showNowPlaying("✨ ${e.name} · $title (in the bulb)", h, color)
             setStatus(if (r.allOk) "${e.name} on $title" else r.toString()) }) } }
         else items += "✨ Built-in effects need a full-color bulb" to { }
-        AppEffects.ALL.forEach { n -> items += "↻ $n · needs Lanternly open" to { startAppEffect(h, title, ok, n) } }
+        AppEffects.ALL.forEach { n -> items += "↻ $n · needs Torchmaster open" to { startAppEffect(h, title, ok, n) } }
         AlertDialog.Builder(this).setTitle("Effects · $title")
             .setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }
             .setNegativeButton("Close", null).show()
@@ -269,7 +269,7 @@ class MainActivity : Activity() {
                 if (gen == effectGen) ui.postAtTime(tick, EFFECT_TIMERS, SystemClock.uptimeMillis() + wait) })
         }
         ui.post(tick)
-        showNowPlaying("↻ $name · $title (keep Lanternly open)", h, targets)
+        showNowPlaying("↻ $name · $title (keep Torchmaster open)", h, targets)
     }
 
     private fun stopAppEffect() { effectGen++; ui.removeCallbacksAndMessages(EFFECT_TIMERS); if (effectLabel != null) { effectLabel = null; if (::nowBar.isInitialized) hideNowPlaying() } }
@@ -380,7 +380,7 @@ class MainActivity : Activity() {
 
     private fun empty() {
         body.addView(text("No bulbs yet", 18f, FG, bold = true).apply { gravity = Gravity.CENTER; setPadding(0, dp(40), 0, dp(8)) }, -1, -2)
-        body.addView(text("Lanternly works only over Bluetooth and never contacts GE or any other server.\nTwo ways to start (open settings):\n• Add a reset bulb: bulbs already paired with the Cync app must be factory reset first. A reset loses the current color; set it again right after adding.\n• Import a Lanternly key file from another phone or PC.", 13f, DIM).apply { gravity = Gravity.CENTER }, -1, -2)
+        body.addView(text("Torchmaster works only over Bluetooth and never contacts GE or any other server.\nTwo ways to start (open settings):\n• Add a reset bulb: bulbs already paired with the Cync app must be factory reset first. A reset loses the current color; set it again right after adding.\n• Import a Torchmaster key file from another phone or PC.", 13f, DIM).apply { gravity = Gravity.CENTER }, -1, -2)
         body.addView(button("Open settings", accent = true) { settingsOpen = true; render() }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(16) })
     }
 
@@ -500,7 +500,7 @@ class MainActivity : Activity() {
         val c1 = card()
         c1.addView(text("Connections", 16f, FG, bold = true))
         c1.addView(toggle("Bluetooth (direct to nearby bulbs)", store.ble) { store.ble = it; ensurePermsThenConnect() })
-        c1.addView(note("Offline only: Lanternly has no internet permission and talks to bulbs over Bluetooth. Keep at least one bulb in range; the mesh relays to the rest."))
+        c1.addView(note("Offline only: Torchmaster has no internet permission and talks to bulbs over Bluetooth. Keep at least one bulb in range; the mesh relays to the rest."))
         body.addView(c1, lp())
 
         val c2 = card()
@@ -515,7 +515,7 @@ class MainActivity : Activity() {
 
         val cl = card()
         cl.addView(text("Sunrise / sunset location (optional)", 16f, FG, bold = true))
-        cl.addView(note("For sunrise and sunset schedules only. Type latitude and longitude in decimal degrees (north and east positive), e.g. from a paper map; a rounded value (1 decimal place, about 10 km) is enough. Lanternly computes sun times on this phone; it doesn't use location permission or the internet."))
+        cl.addView(note("For sunrise and sunset schedules only. Type latitude and longitude in decimal degrees (north and east positive), e.g. from a paper map; a rounded value (1 decimal place, about 10 km) is enough. Torchmaster computes sun times on this phone; it doesn't use location permission or the internet."))
         val loc = store.sunLocation
         val la = edit("Latitude, e.g. 40.7", InputType.TYPE_CLASS_TEXT).apply { setText(loc?.lat?.toString() ?: "") }
         val lo = edit("Longitude, e.g. -74.0", InputType.TYPE_CLASS_TEXT).apply { setText(loc?.lon?.toString() ?: "") }
@@ -534,7 +534,7 @@ class MainActivity : Activity() {
 
         val ca = card()
         ca.addView(text("Add a reset bulb (experimental)", 16f, FG, bold = true))
-        ca.addView(note("This is how bulbs get into Lanternly. A bulb already paired with the Cync app must be factory reset first (see the guide below); the reset loses its current color, which you can set again right after. Lanternly then gives it a private Bluetooth mesh key generated on this phone. No account. Keep the bulb close to the phone."))
+        ca.addView(note("This is how bulbs get into Torchmaster. A bulb already paired with the Cync app must be factory reset first (see the guide below); the reset loses its current color, which you can set again right after. Torchmaster then gives it a private Bluetooth mesh key generated on this phone. No account. Keep the bulb close to the phone."))
         val amsg = note("")
         ca.addView(button("Find reset bulbs") { if (!demo) adopt(amsg) }); ca.addView(amsg); body.addView(ca, lp())
 
@@ -547,7 +547,7 @@ class MainActivity : Activity() {
 
         val c4 = card()
         c4.addView(text("About", 16f, FG, bold = true))
-        c4.addView(note("Lanternly 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
+        c4.addView(note("Torchmaster 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet permission. Keys are never logged."))
         val r2 = LinearLayout(this)
         r2.addView(button("⚠ Forget everything…") {
             AlertDialog.Builder(this).setMessage("Delete stored keys and bulbs from this phone? Bulbs you added will only answer to a key-file backup or another factory reset.").setPositiveButton("Delete everything") { _, _ -> stopAllBlinks(); val old = schedules; schedules = emptyList(); io.execute { Alarms.cancelAll(applicationContext, old); old.forEach { Alarms.remove(applicationContext, it.id) }; teardown(); store.forget(); vault = Vault(); post { render(); setStatus("Forgotten") } } }.setNegativeButton("Cancel", null).show()
@@ -617,7 +617,7 @@ class MainActivity : Activity() {
             c.addView(button("OK") { store.schedulesQuarantined = null; render() })
         }
         if (!demo && !Alarms.exactAllowed(this)) {
-            c.addView(note("⚠ Exact alarms are not allowed. While the phone is idle Android can delay runs by more than ${Schedules.GRACE_MS / 60_000} minutes, and then they are skipped, not run late; two schedules within about 9 minutes of each other may lose one. A fade can also jump straight to its final level, because a run without exact alarms gets only a few seconds. Allow \"Alarms & reminders\" for Lanternly to fix this."))
+            c.addView(note("⚠ Exact alarms are not allowed. While the phone is idle Android can delay runs by more than ${Schedules.GRACE_MS / 60_000} minutes, and then they are skipped, not run late; two schedules within about 9 minutes of each other may lose one. A fade can also jump straight to its final level, because a run without exact alarms gets only a few seconds. Allow \"Alarms & reminders\" for Torchmaster to fix this."))
             if (Build.VERSION.SDK_INT >= 31) c.addView(button("Allow exact alarms") {
                 try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName"))) } catch (e: Exception) { Diag.log("exact alarm settings", e) }
             })
@@ -694,7 +694,7 @@ class MainActivity : Activity() {
         val p1 = edit("Passphrase (8+ characters)", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val p2 = edit("Repeat passphrase", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(p1); addView(p2) }
-        fun pick(pass: String?) { exportPass = pass; startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"; putExtra(Intent.EXTRA_TITLE, "lanternly-keys.json") }, REQ_EXPORT) }
+        fun pick(pass: String?) { exportPass = pass; startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"; putExtra(Intent.EXTRA_TITLE, "torchmaster-keys.json") }, REQ_EXPORT) }
         val d = AlertDialog.Builder(this).setTitle("Export key file")
             .setMessage("The key file contains your mesh password. Anyone with it can control your bulbs over Bluetooth. A passphrase is recommended; it cannot be recovered.")
             .setView(box).setPositiveButton("With passphrase", null).setNeutralButton("Without", null).setNegativeButton("Cancel", null).show()

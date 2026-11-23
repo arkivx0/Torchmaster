@@ -33,7 +33,7 @@ data class BatchResult(val ok: Int, val total: Int, val firstError: String?) {
 /** Diagnostics sink; the app routes it to logcat. Exception types only, never keys. */
 object Diag { @Volatile var sink: ((String, Throwable?) -> Unit)? = null; fun log(where: String, e: Throwable? = null) { try { sink?.invoke(where, e) } catch (_: Throwable) { } } }
 
-/** First link that can reach the bulb wins. Lanternly is offline-only: the link is the Bluetooth mesh. */
+/** First link that can reach the bulb wins. Torchmaster is offline-only: the link is the Bluetooth mesh. */
 class Router(val links: List<Link>) {
     fun pick(h: Home, b: Bulb) = links.firstOrNull { it.canReach(h, b) }
     fun send(h: Home, b: Bulb, c: Cmd): Via {

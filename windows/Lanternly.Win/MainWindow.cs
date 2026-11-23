@@ -19,7 +19,7 @@ public sealed class MainWindow : Window
     /// <summary>Active "find" blinks, at window level so they survive row rebuilds and are stopped on quit.</summary>
     readonly Blinks<Bulb> _blinks = new();
     readonly Dictionary<Bulb, Home> _blinkHome = [];
-    /// <summary>Schedules run by an in-app timer while Lanternly runs (window or tray).</summary>
+    /// <summary>Schedules run by an in-app timer while Torchmaster runs (window or tray).</summary>
     List<Schedule> _schedules;
     readonly Dictionary<long, DateTimeOffset> _due = [];
     readonly System.Windows.Threading.DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(15) };
@@ -47,7 +47,7 @@ public sealed class MainWindow : Window
         _vault = demo ? DemoLink.SampleVault() : Store.LoadVault();
         _vaultWarnings = BulbReset.AddressWarnings(_vault); // shown in settings; nothing is changed
         _schedules = demo ? [] : Store.LoadSchedules();
-        Title = "Lanternly"; Width = 440; Height = 640; MinWidth = 360; MinHeight = 400;
+        Title = "Torchmaster"; Width = 440; Height = 640; MinWidth = 360; MinHeight = 400;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         try { Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/lanternly.ico")); } catch (Exception ex) { Program.Log(ex, "icon"); }
         SourceInitialized += (_, _) => Theme.DarkTitleBar(this);
@@ -63,7 +63,7 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(clock, Dock.Right); top.Children.Add(clock);
         DockPanel.SetDock(_homePick, Dock.Right); top.Children.Add(_homePick);
         var title = new StackPanel();
-        title.Children.Add(new TextBlock { Text = "Lanternly", FontSize = 18, FontWeight = FontWeights.SemiBold });
+        title.Children.Add(new TextBlock { Text = "Torchmaster", FontSize = 18, FontWeight = FontWeights.SemiBold });
         title.Children.Add(_status);
         top.Children.Add(title);
         System.Windows.Automation.AutomationProperties.SetLiveSetting(_status, System.Windows.Automation.AutomationLiveSetting.Polite);
@@ -94,7 +94,7 @@ public sealed class MainWindow : Window
         Loaded += async (_, _) =>
         {
             if (Store.Quarantined is { } q)
-                MessageBox.Show(this, $"Lanternly could not read its stored keys, so it moved them aside to:\n{q}\n\nNothing will be saved until you import a key file (⚙ → Import key file…) or choose Forget everything. Your bulbs are not affected.", "Lanternly: stored keys unreadable", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, $"Torchmaster could not read its stored keys, so it moved them aside to:\n{q}\n\nNothing will be saved until you import a key file (⚙ → Import key file…) or choose Forget everything. Your bulbs are not affected.", "Torchmaster: stored keys unreadable", MessageBoxButton.OK, MessageBoxImage.Error);
             await Reconnect();
         };
         Replan();
@@ -168,7 +168,7 @@ public sealed class MainWindow : Window
     /// <summary>A schedule for a home that is not selected: a temporary connection to that home's mesh, closed afterwards.</summary>
     async Task<BatchResult> RunOtherHome(Home h, Schedule s, CancellationToken ct)
     {
-        if (!_set.Ble) return new BatchResult(0, Schedules.Targets(h, s).Count, "Bluetooth is off in Lanternly settings");
+        if (!_set.Ble) return new BatchResult(0, Schedules.Targets(h, s).Count, "Bluetooth is off in Torchmaster settings");
         BleSession? t = null;
         try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); t.StateChanged += OnState; return await TryRun(new Router([t]), h, s, ct); }
         catch (Exception ex) { Program.Log(ex, "schedule other home"); return new BatchResult(0, Schedules.Targets(h, s).Count, ex.Message); }
@@ -212,7 +212,7 @@ public sealed class MainWindow : Window
                 BleSession? t = null; Router router;
                 if (other)
                 {
-                    if (!_set.Ble) { Note(label + ": Bluetooth is off in Lanternly settings"); return; }
+                    if (!_set.Ble) { Note(label + ": Bluetooth is off in Torchmaster settings"); return; }
                     try { t = await WinGatt.ConnectMeshAsync(h, _ => { }); t.StateChanged += OnState; router = new Router([t]); }
                     catch (Exception ex) { Program.Log(ex, "schedule other home"); Note($"{label}: not reachable ({ex.Message})"); return; }
                 }
@@ -257,7 +257,7 @@ public sealed class MainWindow : Window
         var p = new StackPanel();
         var c = new StackPanel();
         c.Children.Add(new TextBlock { Text = "Schedules", FontWeight = FontWeights.SemiBold, FontSize = 14, Margin = new Thickness(0, 6, 0, 4) });
-        c.Children.Add(new TextBlock { Text = $"Schedules run on this PC only while Lanternly is running (closing the window keeps it in the tray), the PC is awake, Bluetooth is on and a bulb is in range. A run missed by more than {Schedules.Grace.TotalMinutes:0} minutes is skipped, not run late. If no bulb answers, Lanternly reconnects and retries once. Schedules for a home that is not selected still run, over a temporary connection to that home.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 12, Margin = new Thickness(0, 2, 0, 8) });
+        c.Children.Add(new TextBlock { Text = $"Schedules run on this PC only while Torchmaster is running (closing the window keeps it in the tray), the PC is awake, Bluetooth is on and a bulb is in range. A run missed by more than {Schedules.Grace.TotalMinutes:0} minutes is skipped, not run late. If no bulb answers, Torchmaster reconnects and retries once. Schedules for a home that is not selected still run, over a temporary connection to that home.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), FontSize = 12, Margin = new Thickness(0, 2, 0, 8) });
         if (!_demo && Store.SchedulesQuarantined is { } q)
             c.Children.Add(new TextBlock { Text = $"⚠ The saved schedules could not be read, so they were moved aside ({q}) and the list starts empty.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Yellow"), Margin = new Thickness(0, 0, 0, 6) });
         if (!_demo && Store.SchedulesSkipped > 0)
@@ -273,7 +273,7 @@ public sealed class MainWindow : Window
             var line = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
             var del = new Button { Content = "✕ Delete", Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
             System.Windows.Automation.AutomationProperties.SetName(del, "Delete schedule " + Schedules.Describe(home, s));
-            del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); _set.LastFired.Remove(sc.Id); Save(); SaveSchedules(); Render(); };
+            del.Click += (_, _) => { if (MessageBox.Show(this, "Delete this schedule?\n" + Schedules.Describe(home, sc), "Torchmaster", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; _schedules.Remove(sc); _set.LastFired.Remove(sc.Id); Save(); SaveSchedules(); Render(); };
             DockPanel.SetDock(del, Dock.Right); line.Children.Add(del);
             var on = new CheckBox { Style = (Style)FindResource("Switch"), IsChecked = s.Enabled, VerticalAlignment = VerticalAlignment.Center, ToolTip = "Enabled" };
             System.Windows.Automation.AutomationProperties.SetName(on, "Enabled: " + Schedules.Describe(home, s));
@@ -307,7 +307,7 @@ public sealed class MainWindow : Window
         catch (Exception ex) { Program.Log(ex, "settings save"); SetStatus("Could not save settings: " + ex.Message); }
         if (Store.Quarantined != null) { SetStatus("Not saved: stored keys were unreadable. Import a key file or Forget everything."); return false; }
         try { Store.SaveVault(_vault); return true; }
-        catch (Exception ex) { Program.Log(ex, "vault save"); MessageBox.Show(this, "Could not save keys: " + ex.Message, "Lanternly", MessageBoxButton.OK, MessageBoxImage.Error); return false; }
+        catch (Exception ex) { Program.Log(ex, "vault save"); MessageBox.Show(this, "Could not save keys: " + ex.Message, "Torchmaster", MessageBoxButton.OK, MessageBoxImage.Error); return false; }
     }
     static Brush Br(string key) => (Brush)Application.Current.Resources[key];
 
@@ -434,7 +434,7 @@ public sealed class MainWindow : Window
     }
     void SetStatus(string s)
     {
-        _status.Text = s; _tray.Status("Lanternly · " + s);
+        _status.Text = s; _tray.Status("Torchmaster · " + s);
         try { System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(_status)?.RaiseAutomationEvent(System.Windows.Automation.Peers.AutomationEvents.LiveRegionChanged); } catch (Exception) { }
     }
 
@@ -473,7 +473,7 @@ public sealed class MainWindow : Window
     {
         var p = new StackPanel { Margin = new Thickness(0, 30, 0, 0) };
         p.Children.Add(new TextBlock { Text = "No bulbs yet", FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
-        p.Children.Add(new TextBlock { Text = "Lanternly works only over Bluetooth and never contacts GE or any other server.\nTwo ways to start (open settings):\n• Add a reset bulb: bulbs already paired with the Cync app must be factory reset first. A reset loses the current color; set it again right after adding.\n• Import a Lanternly key file from another PC or phone.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(10, 8, 10, 14) });
+        p.Children.Add(new TextBlock { Text = "Torchmaster works only over Bluetooth and never contacts GE or any other server.\nTwo ways to start (open settings):\n• Add a reset bulb: bulbs already paired with the Cync app must be factory reset first. A reset loses the current color; set it again right after adding.\n• Import a Torchmaster key file from another PC or phone.", TextWrapping = TextWrapping.Wrap, Foreground = Br("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(10, 8, 10, 14) });
         var b = new Button { Content = "Open settings", Style = (Style)FindResource("AccentButton"), HorizontalAlignment = HorizontalAlignment.Center };
         b.Click += (_, _) => { _settingsOpen = true; Render(); };
         p.Children.Add(b);
@@ -500,7 +500,7 @@ public sealed class MainWindow : Window
     }
 
     // ---------------- light shows ----------------
-    /// <summary>Effects menu for all bulbs, a room or one bulb: Stop first, then "Runs in the bulb" and "Needs Lanternly open".</summary>
+    /// <summary>Effects menu for all bulbs, a room or one bulb: Stop first, then "Runs in the bulb" and "Needs Torchmaster open".</summary>
     ContextMenu EffectsMenu(Home h, string title, List<Bulb> bulbs)
     {
         var ok = bulbs.Where(b => b.AddressKnown).ToList(); var color = ok.Where(Effects.Supports).ToList();
@@ -511,7 +511,7 @@ public sealed class MainWindow : Window
         if (color.Count == 0) m.Items.Add(new MenuItem { Header = "Needs a full-color bulb", IsEnabled = false });
         else foreach (var e in Effects.All) { var x = e; var mi = new MenuItem { Header = "✨ " + e.Name }; mi.Click += (_, _) => StartNative(h, title, color, x); m.Items.Add(mi); }
         m.Items.Add(new Separator());
-        m.Items.Add(new MenuItem { Header = "Needs Lanternly open", IsEnabled = false });
+        m.Items.Add(new MenuItem { Header = "Needs Torchmaster open", IsEnabled = false });
         foreach (var n in AppEffects.All) { var x = n; var mi = new MenuItem { Header = "↻ " + n }; mi.Click += (_, _) => StartApp(h, title, ok, x); m.Items.Add(mi); }
         return m;
     }
@@ -547,7 +547,7 @@ public sealed class MainWindow : Window
         var targets = bulbs.Where(b => AppEffects.Suits(name, b)).ToList();
         if (targets.Count == 0) { SetStatus($"{name}: no suitable bulb here"); return; }
         var cts = _effectCts = new CancellationTokenSource();
-        ShowNow($"↻ {name} · {title} (keep Lanternly open)", h, targets);
+        ShowNow($"↻ {name} · {title} (keep Torchmaster open)", h, targets);
         Run(async () =>
         {
             await _router.SendManyAsync(h, targets.Where(Effects.Supports), new Cmd.Effect(0)); // end a built-in show first
@@ -745,7 +745,7 @@ public sealed class MainWindow : Window
         var conn = new StackPanel();
         conn.Children.Add(H("Connections"));
         conn.Children.Add(Toggle("Bluetooth (direct to nearby bulbs)", _set.Ble, v => _set.Ble = v));
-        conn.Children.Add(Note("Offline only: Lanternly has no cloud or internet code and talks to bulbs over Bluetooth from this PC. Keep at least one bulb within Bluetooth range; the mesh relays to the rest."));
+        conn.Children.Add(Note("Offline only: Torchmaster has no cloud or internet code and talks to bulbs over Bluetooth from this PC. Keep at least one bulb within Bluetooth range; the mesh relays to the rest."));
         p.Children.Add(Card(conn));
 
         var keys = new StackPanel();
@@ -755,7 +755,7 @@ public sealed class MainWindow : Window
         var imp = new Button { Content = "Import key file…", Margin = new Thickness(0, 0, 6, 6) };
         imp.Click += async (_, _) =>
         {
-            var d = new Microsoft.Win32.OpenFileDialog { Filter = "Lanternly key file|*.json|All files|*.*" };
+            var d = new Microsoft.Win32.OpenFileDialog { Filter = "Torchmaster key file|*.json|All files|*.*" };
             if (d.ShowDialog(this) != true) return;
             try
             {
@@ -770,7 +770,7 @@ public sealed class MainWindow : Window
                 if (Save()) { _settingsOpen = false; await Reconnect(); }
                 if (_vaultWarnings.Count > 0) MessageBox.Show(this, string.Join("\n\n", _vaultWarnings), "Imported, with warnings", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
-            catch (Exception ex) { Program.Log(ex, "import"); MessageBox.Show(this, "Could not import: " + ex.Message, "Lanternly"); }
+            catch (Exception ex) { Program.Log(ex, "import"); MessageBox.Show(this, "Could not import: " + ex.Message, "Torchmaster"); }
         };
         var exp = new Button { Content = "Export key file…", Margin = new Thickness(0, 0, 6, 6), IsEnabled = _vault.Homes.Count > 0 };
         exp.Click += (_, _) => ExportKeys();
@@ -809,9 +809,9 @@ public sealed class MainWindow : Window
 
         var about = new StackPanel();
         about.Children.Add(H("About"));
-        about.Children.Add(Note("Lanternly 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
+        about.Children.Add(Note("Torchmaster 0.1.7 · MIT license. Not affiliated with GE, Savant or Cync. No telemetry, no cloud, no internet connections. Keys are never logged."));
         var forget = new Button { Content = "⚠ Forget everything…", Foreground = Br("Warn"), HorizontalAlignment = HorizontalAlignment.Left };
-        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Lanternly", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
+        forget.Click += async (_, _) => { if (MessageBox.Show(this, "Delete stored keys and bulbs from this PC? Bulbs you added will only answer to a key-file backup or another factory reset.", "Torchmaster", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return; await StopAllBlinks(); await Teardown(); Store.Forget(); _vault = new(); _schedules = []; _set.LastFired.Clear(); _set.LastRun = null; Replan(); _set.BackedUp = true; await Reconnect(); Render(); };
         about.Children.Add(forget);
         var done = new Button { Content = "Done", Style = (Style)FindResource("AccentButton"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0) };
         done.Click += (_, _) => { _settingsOpen = false; Render(); };
@@ -827,17 +827,17 @@ public sealed class MainWindow : Window
         if (choice == MessageBoxResult.Cancel) return;
         string? pass = null;
         if (choice == MessageBoxResult.Yes) { pass = Prompts.Passphrase(this, "Choose a passphrase (at least 8 characters). There is no way to recover it.", confirm: true); if (pass == null) return; }
-        var d = new Microsoft.Win32.SaveFileDialog { FileName = "lanternly-keys.json", Filter = "Lanternly key file|*.json" };
+        var d = new Microsoft.Win32.SaveFileDialog { FileName = "torchmaster-keys.json", Filter = "Torchmaster key file|*.json" };
         if (d.ShowDialog(this) != true) return;
         try { File.WriteAllText(d.FileName, KeyFile.Export(_vault, pass)); _set.BackedUp = true; Save(); UpdateStatus(); Render(); }
-        catch (Exception ex) { Program.Log(ex, "export"); MessageBox.Show(this, "Could not export: " + ex.Message, "Lanternly"); }
+        catch (Exception ex) { Program.Log(ex, "export"); MessageBox.Show(this, "Could not export: " + ex.Message, "Torchmaster"); }
     }
 
     UIElement AdoptPanel(Func<string, TextBlock> H, Func<string, TextBlock> Note)
     {
         var p = new StackPanel();
         p.Children.Add(H("Add a reset bulb (experimental)"));
-        p.Children.Add(Note("This is how bulbs get into Lanternly. A bulb already paired with the Cync app must be factory reset first (see the guide below); the reset loses its current color, which you can set again right after. Lanternly then gives it a private Bluetooth mesh key generated on this PC. No account. Keep the bulb within a few meters of this PC."));
+        p.Children.Add(Note("This is how bulbs get into Torchmaster. A bulb already paired with the Cync app must be factory reset first (see the guide below); the reset loses its current color, which you can set again right after. Torchmaster then gives it a private Bluetooth mesh key generated on this PC. No account. Keep the bulb within a few meters of this PC."));
         var msg = Note("");
         var go = new Button { Content = "Find reset bulbs", HorizontalAlignment = HorizontalAlignment.Left };
         go.Click += async (_, _) =>
@@ -962,7 +962,7 @@ static class Prompts
         var tgt = new ComboBox { ItemsSource = targets.Select(t => t.Name).ToList(), SelectedIndex = 0 };
         System.Windows.Automation.AutomationProperties.SetName(tgt, "Bulbs");
         p.Children.Add(tgt);
-        p.Children.Add(new TextBlock { Text = "Scenes set color and effects run only on bulbs that support them. Runs while Lanternly is running and the PC is awake. A fade starts at the set time and keeps the connection for its whole length.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = (Brush)Application.Current.Resources["Dim"], Margin = new Thickness(0, 8, 0, 0) });
+        p.Children.Add(new TextBlock { Text = "Scenes set color and effects run only on bulbs that support them. Runs while Torchmaster is running and the PC is awake. A fade starts at the set time and keeps the connection for its whole length.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = (Brush)Application.Current.Resources["Dim"], Margin = new Thickness(0, 8, 0, 0) });
         var err = new TextBlock { Foreground = Brushes.IndianRed }; p.Children.Add(err);
         var ok = new Button { Content = "Add", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
         Schedule? result = null;
@@ -982,7 +982,7 @@ static class Prompts
     /// <summary>Small modal passphrase prompt. Returns null on cancel.</summary>
     public static string? Passphrase(Window owner, string text, bool confirm)
     {
-        var w = new Window { Owner = owner, Title = "Lanternly", SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)Application.Current.Resources["Bg"] };
+        var w = new Window { Owner = owner, Title = "Torchmaster", SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)Application.Current.Resources["Bg"] };
         var p = new StackPanel { Margin = new Thickness(16), Width = 320 };
         p.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
         var a = new PasswordBox { Margin = new Thickness(0, 0, 0, 6) }; p.Children.Add(a);

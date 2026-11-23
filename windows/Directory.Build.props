@@ -5,8 +5,8 @@
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <PathMap>$(MSBuildProjectDirectory)=./$(MSBuildProjectName)</PathMap>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-    <Company>Lanternly contributors</Company>
-    <Product>Lanternly</Product>
+    <Company>Torchmaster contributors</Company>
+    <Product>Torchmaster</Product>
     <Version>0.1.7</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

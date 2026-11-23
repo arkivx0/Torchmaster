@@ -4,10 +4,10 @@ Use one test bulb you don't mind resetting. Report for each step: works / fails,
 Windows crash details: `%LOCALAPPDATA%\Lanternly\crash.log` (types and stack traces only).
 
 ## A. No-risk checks (no bulb changes)
-1. Windows: run `Lanternly.exe --demo`. Check the theme, room/bulb rows, scenes and the tray menu (All on/off, Scenes, Quit).
+1. Windows: run `Torchmaster.exe --demo`. Check the theme, room/bulb rows, scenes and the tray menu (All on/off, Scenes, Quit).
 2. Android: install the APK and open it. You see "No bulbs yet". Grant Bluetooth permission when asked.
-3. Android: Settings → Apps → Lanternly → Permissions shows no network permission. Optional: watch a firewall log
-   on Windows; Lanternly should make no connections at all.
+3. Android: Settings → Apps → Torchmaster → Permissions shows no network permission. Optional: watch a firewall log
+   on Windows; Torchmaster should make no connections at all.
 
 ## B. Add a reset bulb (loses that bulb's current color)
 1. Reset the test bulb (docs/RESET.md). It blinks.
@@ -51,16 +51,16 @@ Use times 2–3 minutes ahead. Report the status line (Windows) or the "Last run
    Delete one: it disappears and does not run.
 4. Android:
    1. Close the app (✕) and lock the phone; keep it near the bulb with Bluetooth on. The schedule still runs.
-   2. Reboot the phone (don't open Lanternly), wait for a schedule: it still runs.
+   2. Reboot the phone (don't open Torchmaster), wait for a schedule: it still runs.
    3. Change the phone's time zone or clock, then back: schedules still run at the right local time.
-   4. Settings → Apps → Special app access → Alarms & reminders: if Lanternly shows there (Android 12), turn it off.
+   4. Settings → Apps → Special app access → Alarms & reminders: if Torchmaster shows there (Android 12), turn it off.
       The Schedules page shows the exact-alarm warning and "Allow exact alarms" opens the setting. Runs may be late.
    5. Turn Bluetooth off before a run: "Last run" says "not reachable … retrying at <time>". Turn Bluetooth back on
       within 2 minutes: the retry runs and "Last run" shows the result. Leave it off: after the
       second retry it says "not reachable" with no further retry, and the next regular run still happens.
    6. During a run a small "Running a schedule" notification appears briefly, then goes away. "Last run" never stays
       on "running…" (if it does, note the Android version).
-   7. With Lanternly open and connected (status "BLE ✓"), let a schedule run: "Last run" ends with "(app connection)"
+   7. With Torchmaster open and connected (status "BLE ✓"), let a schedule run: "Last run" ends with "(app connection)"
       and the app stays connected.
    8. Walk out of Bluetooth range for a run (or switch the bulb off at the wall): the app does not freeze, no
       "isn't responding" dialog appears, and "Last run" reports a result within about a minute.
@@ -70,14 +70,14 @@ Use times 2–3 minutes ahead. Report the status line (Windows) or the "Last run
    1. Close the window (it stays in the tray): the schedule still runs; the tray tooltip shows the result.
    2. Put the PC to sleep across a schedule and wake it more than 10 minutes later: the missed run does not happen and
       "Last run" says it was skipped. Sleep the PC for a few minutes, wake it, then let a schedule run: it works
-      (Lanternly reconnects after waking).
+      (Torchmaster reconnects after waking).
    3. With two homes, add a schedule while home A is selected, then select home B: the row says "not selected: runs
       over a temporary connection" and at that time home A's bulb still changes. The Schedules page shows "Last run".
    4. Set the PC clock back across a run that already happened: it does not run again.
-   5. Quit from the tray: no schedule runs until Lanternly is started again.
+   5. Quit from the tray: no schedule runs until Torchmaster is started again.
 
 ## F. Reset bulb over Bluetooth (0.1.4)
-Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported from a key file).
+Use a bulb whose mesh key Torchmaster already has (added in Torchmaster, or imported from a key file).
 1. Make sure the bulb can be controlled first: on/off works and the status shows "BLE ✓".
 2. ⋯ next to the bulb → **Reset bulb…** → read the warning → Continue → **Erase pairing** (Windows: OK, then Yes).
    Cancelling at either step must change nothing.
@@ -104,7 +104,7 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
 
 ## I. 0.1.6: effects, sun schedules, fades, design fixes
 1. Effects on a full-color bulb: ⋯ → Effects → Candlelight. Expect the bulb to flicker on its own and the amber
-   "Now playing" bar. Close Lanternly: the built-in show keeps running. Reopen, tap Stop: the bulb goes back to a
+   "Now playing" bar. Close Torchmaster: the built-in show keeps running. Reopen, tap Stop: the bulb goes back to a
    steady color. Repeat with Rainbow and with Power Up / Splash / Cyber (these three are newer ids; report whether
    your bulbs run them). Note which bulb models do nothing.
 2. Room and All bulbs effects: start Aurora on a room; white-only bulbs in it are skipped and the menu says
@@ -138,7 +138,7 @@ Use a bulb whose mesh key Lanternly already has (added in Lanternly, or imported
 5. Note how long the bulb took to show up as `telink_mesh1` after the reset (if it took more than 10 s, report it).
 
 ## G. 0.1.4 schedule fixes
-1. Android 12+: revoke Nearby devices (Bluetooth) for Lanternly, then let a schedule fire: "Last run" says
+1. Android 12+: revoke Nearby devices (Bluetooth) for Torchmaster, then let a schedule fire: "Last run" says
    "Bluetooth permission missing…" and the app does not crash. Grant it again.
 2. Windows, two homes: start a schedule run on home A, switch to home B straight away. The run finishes ("Last run"
    shows a result) and then home B connects.

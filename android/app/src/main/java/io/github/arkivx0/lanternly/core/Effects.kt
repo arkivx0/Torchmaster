@@ -3,10 +3,10 @@ package io.github.arkivx0.lanternly.core
 import kotlin.random.Random
 
 /**
- * Light shows. NATIVE shows run inside the bulb (one command; Lanternly can disconnect). They use the Cync app's
+ * Light shows. NATIVE shows run inside the bulb (one command; Torchmaster can disconnect). They use the Cync app's
  * "light run mode" command: opcode 0xE2, vendor 0x0211, data 07 <mode> <show id> <random byte>; mode 1 = light show,
  * mode 0 = static (stop). On the wire: E2 11 02 07 01 <id> <rnd>. Same as the official app's SetLightRunModeCommand.
- * APP-SIDE effects are not in the bulb: Lanternly sends timed color/brightness commands while it stays connected
+ * APP-SIDE effects are not in the bulb: Torchmaster sends timed color/brightness commands while it stays connected
  * (rate limited, see [AppEffects]). Mirrors windows/Lanternly.Core/Effects.cs.
  */
 object Effects {
@@ -28,7 +28,7 @@ object Effects {
         byteArrayOf(RUN_MODE.toByte(), (if (id == 0) MODE_STATIC else MODE_LIGHT_SHOW).toByte(), id.toByte(), rnd.toByte())
 }
 
-/** App-side effects (Lanternly sends each step; stops when the app stops or disconnects). */
+/** App-side effects (Torchmaster sends each step; stops when the app stops or disconnects). */
 object AppEffects {
     val ALL = listOf("Color cycle", "Candle flicker", "Breathe")
     /** Never more than this many commands per second in total, so the mesh and normal controls stay responsive. */

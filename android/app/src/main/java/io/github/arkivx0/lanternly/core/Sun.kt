@@ -8,7 +8,7 @@ import kotlin.math.*
 
 /** Coordinates typed by the user (decimal degrees, north/east positive). Never from a location permission. */
 data class SunLocation(val lat: Double, val lon: Double) {
-    /** 1 decimal (about 10 km): what Lanternly stores. */
+    /** 1 decimal (about 10 km): what Torchmaster stores. */
     fun rounded() = SunLocation(Math.round(lat * 10) / 10.0, Math.round(lon * 10) / 10.0)
     companion object {
         fun valid(lat: Double, lon: Double) = !lat.isNaN() && !lon.isNaN() && lat in -90.0..90.0 && lon in -180.0..180.0

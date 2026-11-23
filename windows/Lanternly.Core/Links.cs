@@ -14,7 +14,7 @@ public abstract record Cmd
     public sealed record Effect(int Id) : Cmd;
 }
 
-/// <summary>A way to reach bulbs. Lanternly is offline-only: the one implementation is the Bluetooth mesh (plus test fakes).</summary>
+/// <summary>A way to reach bulbs. Torchmaster is offline-only: the one implementation is the Bluetooth mesh (plus test fakes).</summary>
 public interface ILink
 {
     Via Kind { get; }

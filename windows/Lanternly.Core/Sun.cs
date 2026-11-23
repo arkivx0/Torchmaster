@@ -3,7 +3,7 @@ namespace Lanternly.Core;
 /// <summary>Coordinates typed by the user (decimal degrees, north/east positive). Never from a location service.</summary>
 public sealed record SunLocation(double Lat, double Lon)
 {
-    /// <summary>1 decimal (about 10 km): what Lanternly stores.</summary>
+    /// <summary>1 decimal (about 10 km): what Torchmaster stores.</summary>
     public SunLocation Rounded() => new(Math.Round(Lat, 1, MidpointRounding.AwayFromZero), Math.Round(Lon, 1, MidpointRounding.AwayFromZero));
     public static bool Valid(double lat, double lon) => !double.IsNaN(lat) && !double.IsNaN(lon) && lat is >= -90 and <= 90 && lon is >= -180 and <= 180;
     public static SunLocation? Parse(string lat, string lon) =>

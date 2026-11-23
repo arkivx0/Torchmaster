@@ -60,7 +60,7 @@ class Vault(var homes: List<Home> = emptyList()) {
 
 /** Factory reset steps (GE support article). Shown in the app; needed once for bulbs paired with another app. */
 object ResetText {
-    const val INTRO = "Bulbs already paired with the Cync app must be factory reset once before Lanternly can add them. A reset removes the bulb from its old account and mesh, and it also loses its current color and brightness; set them again in Lanternly right after adding the bulb. " +
+    const val INTRO = "Bulbs already paired with the Cync app must be factory reset once before Torchmaster can add them. A reset removes the bulb from its old account and mesh, and it also loses its current color and brightness; set them again in Torchmaster right after adding the bulb. " +
         "Careful: switching a bulb off and on quickly several times can reset it by accident. " +
         "Use a plain on/off switch or a switched plug/power strip (not a dimmer or 3-way lamp). A reset worked when the bulb blinks (usually 3 times)."
     val METHODS = listOf(

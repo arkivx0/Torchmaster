@@ -1,20 +1,22 @@
-# Lanternly
+# Torchmaster
+
+Formerly named Lanternly.
 
 A small, offline controller for GE Cync / C by GE Bluetooth smart bulbs, for Android and Windows.
 Not affiliated with GE Lighting, Savant or Cync.
 
-- **Offline only.** Lanternly talks to bulbs over Bluetooth (Telink mesh) and nothing else. It has no cloud, account,
+- **Offline only.** Torchmaster talks to bulbs over Bluetooth (Telink mesh) and nothing else. It has no cloud, account,
   sign-in or internet code; the Android app does not even request the INTERNET permission. Tests fail the build if a
   GE cloud host name or a networking API ever appears in the source (`OfflineTests`, `OfflineTest.kt`).
 - **Rooms and bulbs.** On/off, brightness, color temperature and RGB. Rooms get on/off and brightness.
 - **Quick scenes.** Bright, Relax, Focus, Night, Red, Off. Multi-bulb actions report results, e.g. "3/5 bulbs updated".
 - **Light shows.** 12 built-in effects that run inside full-color bulbs (the same command the Cync app sends), plus
-  3 app-side effects (color cycle, candle flicker, breathe) that Lanternly sends while it is open, rate limited.
+  3 app-side effects (color cycle, candle flicker, breathe) that Torchmaster sends while it is open, rate limited.
   Per bulb, room or all bulbs, with a Now playing / Stop bar.
 - **Schedules.** On, off, a scene, an effect, or a fade in/out (5–60 min) for a bulb, a room or all bulbs, at set
   times or at sunrise/sunset ± an offset, on chosen days. Sun times are computed offline from coordinates you type in
   settings (optional; no location permission). They run on the device
-  itself over Bluetooth (Android: system alarms, also after a reboot; Windows: while Lanternly runs in the tray),
+  itself over Bluetooth (Android: system alarms, also after a reboot; Windows: while Torchmaster runs in the tray),
   so the phone or PC must be near the bulbs. A run more than 10 minutes late is skipped, not run late; a run that
   reaches no bulb is retried within those 10 minutes. On Android a run shows a small "Running a schedule"
   notification while it works. Note for store builds: Android's USE_EXACT_ALARM is restricted on Google Play to
@@ -25,17 +27,17 @@ Not affiliated with GE Lighting, Savant or Cync.
 
 ## Getting your bulbs in
 
-Lanternly controls a bulb with a Bluetooth **mesh key** (mesh name + password) that it generates itself. Two ways:
+Torchmaster controls a bulb with a Bluetooth **mesh key** (mesh name + password) that it generates itself. Two ways:
 
 | Way | What happens to the bulb |
 |---|---|
-| **Add a reset bulb** *(experimental)*: factory-reset the bulb, then Lanternly gives it a new private mesh key over Bluetooth | The reset loses the current color and brightness; set them again in Lanternly right after |
-| **Import a key file** exported from another Lanternly install | Nothing; it keeps working as before |
+| **Add a reset bulb** *(experimental)*: factory-reset the bulb, then Torchmaster gives it a new private mesh key over Bluetooth | The reset loses the current color and brightness; set them again in Torchmaster right after |
+| **Import a key file** exported from another Torchmaster install | Nothing; it keeps working as before |
 
-**Bulbs already paired with the Cync app need a factory reset once** before Lanternly can add them, because
+**Bulbs already paired with the Cync app need a factory reset once** before Torchmaster can add them, because
 their current mesh key is held by the Cync account. See [docs/RESET.md](docs/RESET.md). Afterwards **export a key
 file** (Settings → Export key file, passphrase recommended): it is the only way back to your bulbs if the device's
-data is lost, short of another reset. Lanternly keeps reminding you until a backup has been exported.
+data is lost, short of another reset. Torchmaster keeps reminding you until a backup has been exported.
 
 After a reset the bulb is Bluetooth-only (no Wi-Fi). Keep at least one bulb within Bluetooth range of the phone or
 PC; the mesh relays commands to the others.
@@ -45,17 +47,17 @@ PC; the mesh relays commands to the others.
 Each release comes with `SHA256SUMS.txt`. That file is **not signed**; compare it against hashes you got
 through a separate channel.
 
-- **Android APK**: signed with the Lanternly release key. Certificate SHA-256:
+- **Android APK**: signed with the Torchmaster release key. Certificate SHA-256:
   `4f:84:2a:e8:7f:53:b8:2e:b9:6a:f9:c3:2b:c1:87:c5:f4:73:f5:91:31:85:c8:ad:25:d1:47:6c:3c:fe:03:eb`
-  (check with `apksigner verify --print-certs Lanternly-*.apk`). Updates must carry the same certificate.
+  (check with `apksigner verify --print-certs Torchmaster-*.apk`). Updates must carry the same certificate.
 - **Windows exe**: **not code-signed.** Windows SmartScreen will warn "Windows protected your PC" on first run
-  (More info → Run anyway). Check its SHA-256 (`Get-FileHash Lanternly-*.exe`) before running it.
+  (More info → Run anyway). Check its SHA-256 (`Get-FileHash Torchmaster-*.exe`) before running it.
 
 ## Build
 
 - Windows: .NET 8 SDK. `dotnet test windows/Lanternly.Core.Tests` and
   `dotnet publish windows/Lanternly.Win -c Release -r win-x64` (self-contained single exe, Windows 10 19041+).
-  `Lanternly.exe --demo` shows sample data; `--tray` starts minimized.
+  `Torchmaster.exe --demo` shows sample data; `--tray` starts minimized.
 - Android: JDK 17, Android SDK 35. `cd android && ./gradlew testReleaseUnitTest assembleRelease lintRelease`.
   For a signed build set `LANTERNLY_KEYSTORE_PROPS` to a `keystore.properties` kept outside the repo.
   `adb shell am start -n io.github.arkivx0.lanternly/.MainActivity --ez demo true` shows sample data.

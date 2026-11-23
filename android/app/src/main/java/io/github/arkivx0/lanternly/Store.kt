@@ -57,16 +57,16 @@ class Store(ctx: Context) {
 
     /** Read-only load for background work (schedules): never quarantines or rewrites; null if unreadable. */
     fun loadQuiet(): Vault? = try { if (file.exists()) Vault.fromJson(decrypt()) else Vault() } catch (e: Exception) {
-        android.util.Log.w("Lanternly", "vault read (background): ${e.javaClass.simpleName}"); null
+        android.util.Log.w("Torchmaster", "vault read (background): ${e.javaClass.simpleName}"); null
     }
 
     fun load(): Vault {
         if (!file.exists()) return Vault()
         return try {
             val json = decrypt()
-            Vault.fromJson(json).also { if (json.contains("\"Cloud\"")) try { save(it) } catch (e: Exception) { android.util.Log.w("Lanternly", "vault rewrite: ${e.javaClass.simpleName}") } } // 0.1.0 vault with a cloud token: rewrite without it
+            Vault.fromJson(json).also { if (json.contains("\"Cloud\"")) try { save(it) } catch (e: Exception) { android.util.Log.w("Torchmaster", "vault rewrite: ${e.javaClass.simpleName}") } } // 0.1.0 vault with a cloud token: rewrite without it
         } catch (e: Exception) {
-            android.util.Log.w("Lanternly", "vault load failed: ${e.javaClass.simpleName}")
+            android.util.Log.w("Torchmaster", "vault load failed: ${e.javaClass.simpleName}")
             val q = File(file.path + ".corrupt-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()))
             quarantined = if (file.renameTo(q)) q.name else file.name
             Vault()
@@ -96,15 +96,15 @@ class Store(ctx: Context) {
             Schedules.loadOrQuarantine(schedFile.baseFile, SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())) { String(schedFile.readFully()) }
         }.also { l ->
             l.quarantined?.let { prefs.edit().putString("schedQuarantined", it).commit() }
-            if (l.skipped > 0) android.util.Log.w("Lanternly", "schedules: ${l.skipped} invalid entries skipped")
+            if (l.skipped > 0) android.util.Log.w("Torchmaster", "schedules: ${l.skipped} invalid entries skipped")
         }
-    } catch (e: Exception) { android.util.Log.w("Lanternly", "schedules load: ${e.javaClass.simpleName}"); Schedules.Loaded(emptyList(), 0, null) }
+    } catch (e: Exception) { android.util.Log.w("Torchmaster", "schedules load: ${e.javaClass.simpleName}"); Schedules.Loaded(emptyList(), 0, null) }
 
     /** Name of the last quarantined schedules file, shown once on the Schedules page. */
     var schedulesQuarantined: String? get() = prefs.getString("schedQuarantined", null); set(v) { prefs.edit().putString("schedQuarantined", v).apply() }
 
     fun saveSchedules(l: List<Schedule>) = synchronized(LOCK) {
-        val old = try { if (schedFile.baseFile.exists()) String(schedFile.readFully()) else null } catch (e: Exception) { android.util.Log.w("Lanternly", "schedules read before save: ${e.javaClass.simpleName}"); null }
+        val old = try { if (schedFile.baseFile.exists()) String(schedFile.readFully()) else null } catch (e: Exception) { android.util.Log.w("Torchmaster", "schedules read before save: ${e.javaClass.simpleName}"); null }
         val out = schedFile.startWrite()
         try { out.write(Schedules.toJsonKeepingSkipped(l, old).toByteArray()); schedFile.finishWrite(out) } catch (e: Exception) { schedFile.failWrite(out); throw e }
     }

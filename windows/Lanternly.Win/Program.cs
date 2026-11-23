@@ -31,7 +31,7 @@ public static class Program
         if (!first) return;
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         try { app.Resources = Theme.Load(); } catch (Exception ex) { Log(ex, "Theme"); }
-        app.DispatcherUnhandledException += (_, e) => { Log(e.Exception, "UI"); MessageBox.Show(e.Exception.Message, "Lanternly", MessageBoxButton.OK, MessageBoxImage.Warning); e.Handled = true; };
+        app.DispatcherUnhandledException += (_, e) => { Log(e.Exception, "UI"); MessageBox.Show(e.Exception.Message, "Torchmaster", MessageBoxButton.OK, MessageBoxImage.Warning); e.Handled = true; };
         var w = new MainWindow(demo);
         if (!args.Contains("--tray")) w.Show();
         app.Run();

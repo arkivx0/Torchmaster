@@ -3,7 +3,7 @@ namespace Lanternly.Core;
 /// <summary>
 /// Light shows. Native shows run inside the bulb: opcode 0xE2, vendor 0x0211, data 07 &lt;mode&gt; &lt;show id&gt; &lt;random&gt;;
 /// mode 1 = light show, 0 = static (stop). On the wire: E2 11 02 07 01 &lt;id&gt; &lt;rnd&gt;, as the official app's
-/// SetLightRunModeCommand. App-side effects are timed commands sent by Lanternly (see <see cref="AppEffects"/>). Mirrors Effects.kt.
+/// SetLightRunModeCommand. App-side effects are timed commands sent by Torchmaster (see <see cref="AppEffects"/>). Mirrors Effects.kt.
 /// </summary>
 public static class Effects
 {
@@ -21,7 +21,7 @@ public static class Effects
     public static byte[] Data(int id, int? rnd = null) => [RunMode, (byte)(id == 0 ? 0 : 1), (byte)id, (byte)(rnd ?? Random.Shared.Next(256))];
 }
 
-/// <summary>App-side effects: Lanternly sends each step while it runs; rate limited.</summary>
+/// <summary>App-side effects: Torchmaster sends each step while it runs; rate limited.</summary>
 public static class AppEffects
 {
     public static readonly string[] All = ["Color cycle", "Candle flicker", "Breathe"];

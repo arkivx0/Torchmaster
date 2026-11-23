@@ -1,24 +1,24 @@
 # Factory reset
 
 > **⚠ Caution: read before you reset**
-> - A reset **loses the bulb's current color and brightness.** Set them again in Lanternly right after adding the bulb.
+> - A reset **loses the bulb's current color and brightness.** Set them again in Torchmaster right after adding the bulb.
 > - Switching a bulb off and on quickly several times can **reset it by accident.** Avoid rapid toggling at other times.
 > - Use a plain on/off switch or a switched plug/power strip, not a dimmer or 3-way lamp.
-> - After a reset, the bulb only answers to the key Lanternly gives it. **Export a key file backup** afterwards.
+> - After a reset, the bulb only answers to the key Torchmaster gives it. **Export a key file backup** afterwards.
 
-Bulbs already paired with the Cync app need a reset **once** before Lanternly can add them: their mesh key belongs
-to the Cync account, and Lanternly never contacts the cloud to fetch it. Bulbs you add from a Lanternly key file
+Bulbs already paired with the Cync app need a reset **once** before Torchmaster can add them: their mesh key belongs
+to the Cync account, and Torchmaster never contacts the cloud to fetch it. Bulbs you add from a Torchmaster key file
 don't need a reset. A reset worked when the bulb blinks (usually 3 times).
 
 Source: GE Cync support article "Resetting Cync Light Bulbs" (Bluetooth + Direct Connect bulbs).
 
-## Reset from Lanternly (no power-cycling)
-If Lanternly already has the bulb's mesh key (you added it in Lanternly, or imported a key file with that
+## Reset from Torchmaster (no power-cycling)
+If Torchmaster already has the bulb's mesh key (you added it in Torchmaster, or imported a key file with that
 home's mesh name and password), it can reset the bulb over Bluetooth: ⋯ next to the bulb → **Reset bulb…** → confirm
-twice. Lanternly then checks for about 10 s that the bulb restarted as a reset bulb; if so it is removed from the
+twice. Torchmaster then checks for about 10 s that the bulb restarted as a reset bulb; if so it is removed from the
 home together with any schedule for that bulb alone (if not, you choose Keep or Remove anyway). Bulbs with a group
 address, or sharing an address with another bulb, can't be reset this way. Then use **Add a reset bulb → Find reset bulbs** to add it fresh.
-This sends the Telink kick-out command (see spec/PROTOCOL.md). Bulbs still on a Cync account whose key Lanternly
+This sends the Telink kick-out command (see spec/PROTOCOL.md). Bulbs still on a Cync account whose key Torchmaster
 doesn't have can only be reset by power-cycling.
 
 ## Current firmware (try first)
@@ -41,8 +41,8 @@ If one method fails, try another, and try a different fixture or a switched powe
 
 ## After a reset
 A reset bulb advertises over Bluetooth as `telink_mesh1` (Telink factory default, password `123`).
-Lanternly's **Add a reset bulb** finds it and writes a private mesh name, password and long-term key that it
-generates on your device (experimental). The new key lives only in your Lanternly vault and key-file backups.
+Torchmaster's **Add a reset bulb** finds it and writes a private mesh name, password and long-term key that it
+generates on your device (experimental). The new key lives only in your Torchmaster vault and key-file backups.
 Then set the color and brightness you want.
 
-A reset bulb is **not** on Wi-Fi and Lanternly does not put it on Wi-Fi; it is controlled over Bluetooth only.
+A reset bulb is **not** on Wi-Fi and Torchmaster does not put it on Wi-Fi; it is controlled over Bluetooth only.

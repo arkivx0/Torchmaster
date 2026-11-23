@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Renamed from Lanternly to Torchmaster. The Android package (`io.github.arkivx0.lanternly`) and the Windows settings folder (`%LOCALAPPDATA%\Lanternly`) are unchanged, so existing installs and pairings keep working.
+
+
 ## 0.1.7 (unreleased, Android versionCode 9)
 - **Fade schedules you can rely on.** Android holds a wake lock for the length of a run, so a wake-up fade keeps stepping
   with the screen off. On both platforms a fade no longer blocks other schedules: they run on time beside it. A later
@@ -20,7 +24,7 @@
 - **Light shows.** An Effects menu for all bulbs, each room and each bulb. Twelve built-in shows run inside the
   bulb (Candlelight, Rainbow, Fireworks, Volcanic, Aurora, Happy Holidays, Red White & Blue, Vegas, Party Time,
   Power Up, Splash, Cyber), on full-color bulbs. Three **app-side** effects (Color cycle, Candle flicker, Breathe)
-  are sent step by step by Lanternly while it stays open, at most 4 commands a second. A **Now playing / Stop** bar
+  are sent step by step by Torchmaster while it stays open, at most 4 commands a second. A **Now playing / Stop** bar
   shows whatever is running. Windows also has Effects in the tray menu.
 - **Sunrise and sunset schedules** with an offset of up to ±180 minutes. Enter latitude/longitude in settings
   (optional); sun times are computed on the device, with no location permission. New schedule actions: start or
@@ -48,16 +52,16 @@ Reset bulb fixes from the 0.1.4 review:
 - **Key-file import checks addresses:** a file with a bulb or room address above 0x7FFF, or two bulbs of one home
   on the same address, is rejected ("Could not import: …"). 0 (address not learned yet) is still accepted.
 - **The reset is confirmed before the bulb is removed.** The bulb doesn't acknowledge the command, so after sending it
-  Lanternly listens for about 10 s for that bulb's factory-reset advertisement (`telink_mesh1`). If it's seen, the bulb
+  Torchmaster listens for about 10 s for that bulb's factory-reset advertisement (`telink_mesh1`). If it's seen, the bulb
   and its own schedules are removed. If not, it asks: **Keep** (nothing removed; try again closer) or **Remove anyway**.
 - Android: the bulb list is changed only on the UI thread after a reset (before, it was changed on the Bluetooth
   thread while the screen could be drawing it).
 
 ## 0.1.4 (unreleased, Android versionCode 6)
-- **Reset bulb…** (per bulb, under ⋯): factory resets a bulb whose mesh key Lanternly has, over Bluetooth, for bulbs
+- **Reset bulb…** (per bulb, under ⋯): factory resets a bulb whose mesh key Torchmaster has, over Bluetooth, for bulbs
   that won't reset by power-cycling. Sends the Telink kick-out command (`E3 11 02 01`, the same bytes as the official
   app's kick-out). Asks twice before it does anything ("This erases the bulb's pairing; you'll need to add it again").
-  When the command goes out, the bulb is removed from the home and its rooms, and Lanternly points to
+  When the command goes out, the bulb is removed from the home and its rooms, and Torchmaster points to
   Add a reset bulb → Find reset bulbs. If it can't be sent, nothing is removed. Tested against the simulated bulb only.
 - Import a key file that has the bulb's existing mesh name and password (e.g. one you exported yourself) to control or
   reset that bulb without power-cycling it.
@@ -78,7 +82,7 @@ Reset bulb fixes from the 0.1.4 review:
   time on chosen days. Runs on the device only, over Bluetooth, with no network.
   - Android: exact alarms when allowed (falls back to inexact), re-planned after reboot and clock or time zone
     changes. The phone must be near the bulbs with Bluetooth on. A run more than 10 minutes late is skipped.
-  - Windows: runs while Lanternly is open or in the tray and the PC is awake. A run more than 5 minutes late is skipped.
+  - Windows: runs while Torchmaster is open or in the tray and the PC is awake. A run more than 5 minutes late is skipped.
 - Fixes from review: leaving the app no longer drops other pending UI updates; closing no longer blocks the UI
   while stops are sent; the automatic blink stop reports a failed stop; Forget, Import and switching homes stop
   any blink first; Windows Bluetooth writes time out instead of blocking later commands.
@@ -93,7 +97,7 @@ Reset bulb fixes from the 0.1.4 review:
     10-minute window; retries never replace the next regular alarm.
   - Android: when the app is open and connected, a run uses that connection instead of opening a second one.
   - Android 12 with exact alarms denied: the warning now says plainly that idle-time delays can make runs skip.
-  - Windows: after the PC wakes from sleep Lanternly reconnects and checks schedules; a run that reaches no bulb
+  - Windows: after the PC wakes from sleep Torchmaster reconnects and checks schedules; a run that reaches no bulb
     reconnects and retries once.
   - Windows: schedules for a home that is not selected now run, over a temporary connection to that home, and
     the row says so. The Schedules page keeps a "Last run" line.
@@ -116,7 +120,7 @@ Reset bulb fixes from the 0.1.4 review:
   an accessible name; find no longer marks a bulb with unknown state as on.
 - Windows: BLE command writes are serialized, so a stop can't overtake its start.
 - Android: bulb commands run on their own queue, so scanning or adding bulbs no longer delays them; buttons are 48 dp.
-- Privacy notes: how Lanternly differs from the vendor app, and why it is Bluetooth-only.
+- Privacy notes: how Torchmaster differs from the vendor app, and why it is Bluetooth-only.
 - More offline regression tests (both platforms): vendor cloud names, vendor LAN markers, networking APIs and
   the INTERNET permission fail the build. New test pins the identify command bytes.
 
@@ -124,7 +128,7 @@ Reset bulb fixes from the 0.1.4 review:
 **Offline only.** All cloud code is removed: no Cync sign-in, no one-time cloud export, no cloud fallback, and no
 code that contacts any GE host. The Windows LAN bridge is removed too: it needed GE host names redirected to the
 PC plus per-device IDs and codes that only the cloud provides, so it cannot work offline. Mesh keys now come only
-from "Add a reset bulb" (a key Lanternly generates) or from a key file.
+from "Add a reset bulb" (a key Torchmaster generates) or from a key file.
 - New offline tests (both platforms) fail if a GE cloud host name, a networking API or the Android INTERNET
   permission appears in the source. The Windows core assembly is checked to reference no `System.Net.*` assembly.
 - Android: the INTERNET permission is gone; R8 minification is on (APK 2.2 MB to 0.1 MB); lint now fails the build on errors.

@@ -124,7 +124,7 @@ class ScheduleReceiver : BroadcastReceiver() {
         // Android 14+ refuses a connectedDevice foreground service without BLUETOOTH_CONNECT: record it instead of crashing the start.
         if (Build.VERSION.SDK_INT >= 31 && app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             val r = goAsync()
-            Thread { try { ScheduleJob.failed(app, intent, "Bluetooth permission missing (open Lanternly to allow it)") } finally { r.finish() } }.start()
+            Thread { try { ScheduleJob.failed(app, intent, "Bluetooth permission missing (open Torchmaster to allow it)") } finally { r.finish() } }.start()
             return
         }
         try {
@@ -247,7 +247,7 @@ object ScheduleJob {
     /** Holds a partial wake lock (timeout = budget) so a fade keeps stepping with the screen off. */
     fun run(ctx: Context, intent: Intent, budgetMs: Long) {
         val wl = try { (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
-            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Lanternly:schedule").apply { setReferenceCounted(false); acquire(budgetMs + 5_000) } } catch (e: Exception) { Diag.log("wake lock", e); null }
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Torchmaster:schedule").apply { setReferenceCounted(false); acquire(budgetMs + 5_000) } } catch (e: Exception) { Diag.log("wake lock", e); null }
         try { runLocked(ctx, intent, budgetMs) } finally { try { if (wl?.isHeld == true) wl.release() } catch (e: Exception) { Diag.log("wake lock release", e) } }
     }
 
@@ -265,7 +265,7 @@ object ScheduleJob {
         if (!Schedules.onTime(due, start)) { note(store, s, "skipped (more than ${Schedules.GRACE_MS / 60_000} minutes late)"); return }
         note(store, s, if (attempt > 0) "running… (retry $attempt)" else "running…") // visible even if the process is killed
         if (Build.VERSION.SDK_INT >= 31 && ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) { note(store, s, "Bluetooth permission missing"); return }
-        if (!store.ble) { note(store, s, "Bluetooth is off in Lanternly settings"); return }
+        if (!store.ble) { note(store, s, "Bluetooth is off in Torchmaster settings"); return }
         val vault = store.loadQuiet() ?: run { note(store, s, "stored keys unreadable"); return }
         val h = vault.homes.firstOrNull { it.id == s.homeId } ?: run { note(store, s, "its home was removed"); return }
         if (Schedules.targets(h, s).isEmpty()) { note(store, s, "no bulbs to control"); return }

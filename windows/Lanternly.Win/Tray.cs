@@ -6,7 +6,7 @@ namespace Lanternly.Win;
 /// <summary>Tray icon: left-click opens; menu has All on / All off, scenes, Quit.</summary>
 public sealed class Tray : IDisposable
 {
-    readonly F.NotifyIcon _icon = new() { Text = "Lanternly" };
+    readonly F.NotifyIcon _icon = new() { Text = "Torchmaster" };
     public event Action? Open, Quit;
     public event Action<bool>? AllPower;
     public event Action<Scenes.Scene>? Scene;
@@ -16,7 +16,7 @@ public sealed class Tray : IDisposable
     public Tray()
     {
         var m = new F.ContextMenuStrip();
-        m.Items.Add("Open Lanternly", null, (_, _) => Open?.Invoke());
+        m.Items.Add("Open Torchmaster", null, (_, _) => Open?.Invoke());
         m.Items.Add(new F.ToolStripSeparator());
         m.Items.Add("All on", null, (_, _) => AllPower?.Invoke(true));
         m.Items.Add("All off", null, (_, _) => AllPower?.Invoke(false));

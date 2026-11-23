@@ -20,10 +20,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Offline by design: no network permission is requested, so the app cannot open any connection. -->
     <application
-        android:label="Lanternly"
+        android:label="Torchmaster"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:theme="@style/Theme.Lanternly">
+        android:theme="@style/Theme.Torchmaster">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

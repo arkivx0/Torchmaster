@@ -23,7 +23,7 @@ public static class BulbReset
     public static string UnconfirmedText(Bulb b) =>
         $"The reset was sent, but \"{b.Name}\" was not seen restarting as a reset bulb. It may be out of range and still paired.\n\n" +
         (CanConfirm(b) ? "" : NoMacText(b) + "\n\n") +
-        "Yes = Keep: leave it in this home (you can try again closer; Lanternly reconnects).\nNo = Remove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back).";
+        "Yes = Keep: leave it in this home (you can try again closer; Torchmaster reconnects).\nNo = Remove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back).";
 
     /// <summary>Why this bulb must not be reset from the app, or null when it can.</summary>
     public static string? RefuseReason(Home h, Bulb b) =>
@@ -87,5 +87,5 @@ public static class BulbReset
 
     /// <summary>A bulb with no Bluetooth address on file can't be recognised in the confirmation scan.</summary>
     public static bool CanConfirm(Bulb b) => b.Mac.Replace(":", "").Replace("-", "").Length == 12;
-    public static string NoMacText(Bulb b) => $"\"{b.Name}\" has no Bluetooth address on file, so Lanternly can't recognise it when it restarts as a reset bulb; the reset can't be confirmed. If it blinks or turns on at full white after the reset, choose Remove anyway.";
+    public static string NoMacText(Bulb b) => $"\"{b.Name}\" has no Bluetooth address on file, so Torchmaster can't recognise it when it restarts as a reset bulb; the reset can't be confirmed. If it blinks or turns on at full white after the reset, choose Remove anyway.";
 }

@@ -21,7 +21,7 @@ object BulbReset {
     const val UNCONFIRMED_TITLE = "Couldn't confirm the reset"
     fun unconfirmedText(b: Bulb) = "The reset was sent, but \"${b.name}\" was not seen restarting as a reset bulb. It may be out of range and still paired.\n\n" +
         (if (!canConfirm(b)) noMacText(b) + "\n\n" else "") +
-        "Keep: leave it in this home (you can try again closer; Lanternly reconnects).\nRemove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back)."
+        "Keep: leave it in this home (you can try again closer; Torchmaster reconnects).\nRemove anyway: forget it and its own schedules (if it is still paired, only a power-switch reset brings it back)."
 
     /** Why this bulb must not be reset from the app, or null when it can. */
     fun refuseReason(h: Home, b: Bulb): String? = when {
@@ -41,7 +41,7 @@ object BulbReset {
     fun confirmed(b: Bulb, factoryMacs: List<String>) = b.mac.isNotBlank() && factoryMacs.any { it.equals(b.mac, ignoreCase = true) }
     /** A bulb with no Bluetooth address on file (e.g. from some key files) can't be recognised in the scan. */
     fun canConfirm(b: Bulb) = b.mac.replace(":", "").replace("-", "").length == 12
-    fun noMacText(b: Bulb) = "\"${b.name}\" has no Bluetooth address on file, so Lanternly can't recognise it when it restarts as a reset bulb; the reset can't be confirmed. " +
+    fun noMacText(b: Bulb) = "\"${b.name}\" has no Bluetooth address on file, so Torchmaster can't recognise it when it restarts as a reset bulb; the reset can't be confirmed. " +
         "If it blinks or turns on at full white after the reset, choose Remove anyway."
 
     /** Schedules that control only this bulb: they must go with it, or a later bulb given the same address would inherit them. */

@@ -1,6 +1,6 @@
-# Lanternly protocol notes
+# Torchmaster protocol notes
 
-Shared by `windows/Lanternly.Core` (C#) and `android/.../core` (Kotlin). Lanternly is offline-only, so the only
+Shared by `windows/Lanternly.Core` (C#) and `android/.../core` (Kotlin). Torchmaster is offline-only, so the only
 protocol is Bluetooth LE (Telink mesh). Both implementations are tested against `test_vectors.json`, produced by
 running acync/cync2mqtt `mesh.py` (Telink crypto). The factory pairing write is also checked against the
 constant published by the cync-lan project.
@@ -52,9 +52,9 @@ every run-mode command. Light show ids (official app `LightRunMode.LightShow`): 
 3 Fireworks, 4 Volcanic, 5 Aurora, 6 Happy Holidays, 7 Red White & Blue, 8 Vegas, 9 Party Time, 65 Power Up,
 66 Splash, 67 Cyber; 10–32 are user-made custom shows. The status byte reports 224/225/227 for Power Up/Splash/Cyber.
 cync-lan independently sends `E2 … 11 02 07 01 <id> <byte>` with the same ids, except Fireworks (it uses 0x3A;
-Lanternly follows the app's 3). The app offers shows only on full-color bulbs (Capability LightShow).
+Torchmaster follows the app's 3). The app offers shows only on full-color bulbs (Capability LightShow).
 
-Not native (done by Lanternly with timed commands): color cycle, candle flicker, breathe, and fades over minutes.
+Not native (done by Torchmaster with timed commands): color cycle, candle flicker, breathe, and fades over minutes.
 
 ## Sun times
 
