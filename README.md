@@ -21,7 +21,16 @@ Already using Lanternly? Install Torchmaster over it. It is the same app under a
 schedules and keys carry over. See [Downloads and verification](#downloads-and-verification) to check a file
 before running it.
 
-<!-- Screenshots go here -->
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/lights.png" width="200" alt="Lights screen with quick scenes and a bulb">
+  <img src="docs/screenshots/schedules.png" width="200" alt="Schedules screen">
+  <img src="docs/screenshots/settings.png" width="200" alt="Settings: Bluetooth, mesh keys and sunrise location">
+  <img src="docs/screenshots/reset-guide.png" width="200" alt="Built-in bulb reset guide">
+</p>
+
+<sub>Android app, shown under its earlier name Lanternly.</sub>
 
 ## Features
 
