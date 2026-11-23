@@ -1,9 +1,30 @@
 # Torchmaster
 
-Formerly named Lanternly.
+[![Latest release](https://img.shields.io/github/v/release/arkivx0/Torchmaster)](https://github.com/arkivx0/Torchmaster/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20Windows-informational)
 
-A small, offline controller for GE Cync / C by GE Bluetooth smart bulbs, for Android and Windows.
-Not affiliated with GE Lighting, Savant or Cync.
+**Light your bulbs without the cloud.** A small, offline controller for GE Cync / C by GE Bluetooth smart bulbs,
+for Android and Windows. No account, no sign-in, no internet, no tracking.
+Formerly named Lanternly. Not affiliated with GE Lighting, Savant or Cync.
+
+## Download
+
+Grab the latest from the [Releases page](https://github.com/arkivx0/Torchmaster/releases/latest):
+
+| Platform | File | Needs |
+|---|---|---|
+| Android | `Torchmaster-<version>.apk` | Android 10 or newer, Bluetooth |
+| Windows | `Torchmaster-<version>-win-x64.exe` (single file, nothing to install) | Windows 10 (19041+) or 11, Bluetooth LE |
+
+Already using Lanternly? Install Torchmaster over it. It is the same app under a new name, so your bulbs, rooms,
+schedules and keys carry over. See [Downloads and verification](#downloads-and-verification) to check a file
+before running it.
+
+<!-- Screenshots go here -->
+
+## Features
+
 
 - **Offline only.** Torchmaster talks to bulbs over Bluetooth (Telink mesh) and nothing else. It has no cloud, account,
   sign-in or internet code; the Android app does not even request the INTERNET permission. Tests fail the build if a
